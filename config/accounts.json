@@ -1,0 +1,26 @@
+[
+  {
+    "id": "career-cat",
+    "name": "就活ねこ（デモ）",
+    "target": "28・29卒",
+    "persona": "就活を効率よく進めたい大学生",
+    "tone": "親しみやすく、短く、断定しすぎない",
+    "primaryColor": "#6C5CE7",
+    "secondaryColor": "#FFE66D",
+    "backgroundColor": "#F7F5FF",
+    "inkColor": "#201B3A",
+    "cta": "保存して、あとで見返そう"
+  },
+  {
+    "id": "career-guide",
+    "name": "就活ガイド（デモ）",
+    "target": "28・29卒",
+    "persona": "就活を何から始めればよいか不安な大学生",
+    "tone": "共感的で、具体的な次の一歩を示す",
+    "primaryColor": "#0F766E",
+    "secondaryColor": "#FDE68A",
+    "backgroundColor": "#F0FDFA",
+    "inkColor": "#12312E",
+    "cta": "迷ったら、この投稿を保存"
+  }
+]

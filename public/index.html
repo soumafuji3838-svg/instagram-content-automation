@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Instagram Carousel Studio</title>
+  <style>
+    :root{--ink:#17152b;--muted:#6b6880;--line:#e7e4ef;--brand:#6c5ce7;--bg:#f7f6fb;--ok:#087f5b;--danger:#b42318}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}.shell{max-width:1180px;margin:0 auto;padding:36px 24px 72px}.top{display:flex;justify-content:space-between;gap:24px;align-items:flex-end;margin-bottom:26px}.eyebrow{color:var(--brand);font-weight:800;font-size:13px;letter-spacing:.12em;text-transform:uppercase}h1{font-size:clamp(30px,5vw,54px);line-height:1.05;margin:8px 0}.lead{color:var(--muted);margin:0}.badge{padding:10px 14px;border-radius:999px;background:#fff;border:1px solid var(--line);font-size:13px;font-weight:700}.grid{display:grid;grid-template-columns:360px 1fr;gap:22px}.card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 12px 35px rgba(36,30,72,.05)}label{display:block;font-weight:750;font-size:13px;margin:15px 0 7px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:12px 13px;font:inherit;color:var(--ink);background:#fff}textarea{min-height:96px;resize:vertical}button{border:0;border-radius:12px;padding:12px 16px;font:inherit;font-weight:800;cursor:pointer}.primary{width:100%;margin-top:18px;background:var(--brand);color:#fff}.secondary{background:#efedff;color:#4839c7}.publish{background:var(--ink);color:#fff}.ghost{background:#f6f5f9;color:#4f4b60}.danger{background:#fff0ee;color:var(--danger)}.status{font-size:13px;color:var(--muted);margin-top:12px;min-height:20px}.empty{display:grid;place-items:center;min-height:350px;text-align:center;color:var(--muted)}.posts{display:grid;gap:18px}.post-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.post-title{margin:0;font-size:22px}.meta{color:var(--muted);font-size:13px;margin-top:5px}.pill{white-space:nowrap;background:#f1eff8;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:800}.slides{display:flex;gap:12px;overflow:auto;padding:18px 0 10px;scroll-snap-type:x mandatory}.slides img{width:180px;aspect-ratio:4/5;border-radius:12px;border:1px solid var(--line);object-fit:cover;scroll-snap-align:start}.caption{white-space:pre-wrap;background:#faf9fd;border-radius:12px;padding:14px;color:#454157;font-size:13px;max-height:155px;overflow:auto}.quality{margin-top:12px;border:1px solid var(--line);border-radius:14px;padding:13px;background:#fcfbff}.quality summary,.sources summary{font-weight:800;cursor:pointer}.score{font-size:20px;color:var(--brand);margin-right:8px}.check{display:grid;grid-template-columns:26px 1fr;gap:7px;margin-top:10px;font-size:12px}.pass{color:var(--ok);font-weight:900}.fail{color:var(--danger);font-weight:900}.suggestion{color:var(--muted);margin-top:3px}.sources{margin-top:12px;border:1px solid var(--line);border-radius:14px;padding:13px}.source-list{margin:10px 0 0;padding-left:20px;font-size:12px}.source-list li{margin:8px 0}.source-list a{color:#4839c7;font-weight:700}.verified{color:var(--ok);font-size:11px}.actions{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}.actions button:disabled{opacity:.45;cursor:not-allowed}.ok{color:var(--ok);font-weight:700}.busy{opacity:.62;pointer-events:none}dialog{width:min(760px,calc(100% - 28px));max-height:90vh;border:0;border-radius:22px;padding:0;box-shadow:0 30px 90px rgba(23,21,43,.25)}dialog::backdrop{background:rgba(23,21,43,.55)}.dialog-body{padding:24px;max-height:90vh;overflow:auto}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:18px;position:sticky;top:-24px;background:#fff;padding:8px 0 14px;z-index:2}.dialog-head h2{margin:0}.close{background:#f6f5f9;font-size:18px}.slide-editor{border:1px solid var(--line);border-radius:16px;padding:14px;margin:14px 0}.slide-editor strong{color:var(--brand)}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;position:sticky;bottom:-24px;background:#fff;padding:16px 0 4px}@media(max-width:820px){.grid{grid-template-columns:1fr}.top{display:block}.badge{display:inline-block;margin-top:14px}.slides img{width:150px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div><div class="eyebrow">Content Quality MVP v0.4</div><h1>Instagram<br>Research Studio</h1><p class="lead">Web調査から原稿・参照元・品質評価・7枚の画像まで生成します。</p></div>
+      <div id="mode" class="badge">設定を確認中…</div>
+    </header>
+    <div class="grid">
+      <form id="form" class="card">
+        <strong>新しい投稿を作成</strong>
+        <label for="account">アカウント</label><select id="account" name="accountId"></select>
+        <label for="contentType">投稿タイプ</label><select id="contentType" name="contentType"></select>
+        <label for="targetYear">対象</label><input id="targetYear" name="targetYear" value="28・29卒">
+        <label for="topic">投稿テーマ</label><input id="topic" name="topic" required placeholder="例：夏インターンの探し方">
+        <label for="notes">追加指示（任意）</label><textarea id="notes" name="notes" placeholder="含めたい観点や避けたい表現"></textarea>
+        <button class="primary" type="submit">調査・原稿・画像を生成</button>
+        <div id="formStatus" class="status" aria-live="polite"></div>
+      </form>
+      <section><div id="posts" class="posts"><div class="card empty">まだ投稿がありません。<br>左のフォームから最初の投稿を生成してください。</div></div></section>
+    </div>
+  </main>
+  <dialog id="editor">
+    <form id="editorForm" class="dialog-body">
+      <div class="dialog-head"><h2>投稿原稿を編集</h2><button type="button" class="close" onclick="closeEditor()" aria-label="閉じる">×</button></div>
+      <input type="hidden" id="editId">
+      <label for="editInternalTitle">管理用タイトル</label><input id="editInternalTitle" required>
+      <label for="editHook">表紙タイトル</label><textarea id="editHook" required></textarea>
+      <div id="slideEditors"></div>
+      <label for="editCaption">キャプション</label><textarea id="editCaption" required></textarea>
+      <label for="editHashtags">ハッシュタグ（空白区切り）</label><input id="editHashtags" required>
+      <div class="dialog-actions"><button type="button" class="ghost" onclick="closeEditor()">キャンセル</button><button type="submit" class="publish">保存して画像を再生成</button></div>
+    </form>
+  </dialog>
+  <script>
+    const state = { config: null, posts: [], pending: new Set() };
+    const $ = (selector) => document.querySelector(selector);
+    const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    async function request(url, options = {}) {
+      const response = await fetch(url, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "処理に失敗しました");
+      return body;
+    }
+    function setPending(id, value) { value ? state.pending.add(id) : state.pending.delete(id); render(); }
+    function replacePost(updated) { state.posts = state.posts.map((post) => post.id === updated.id ? updated : post); render(); }
+    function statusLabel(status) { return ({review:"確認待ち",approved:"承認済み",dry_run_complete:"ドライラン完了",published:"投稿済み"})[status] || status; }
+    function captionText(post) {
+      const sourceNotes = (post.sources || []).slice(0, 5).map((source, index) => `${index + 1}. ${source.publisher || source.title}（${source.publishedAt || "日付不明"}）`);
+      return `${post.content.caption}\n\n${post.content.hashtags.join(" ")}${sourceNotes.length ? `\n\n【参照】\n${sourceNotes.join("\n")}` : ""}`.trim();
+    }
+    function qualityHtml(post) {
+      if (!post.quality) return '<div class="quality"><strong>品質評価：</strong>旧データのため未評価です。再生成すると評価されます。</div>';
+      const checks = post.quality.checks.map((check) => `<div class="check"><span class="${check.pass ? "pass" : "fail"}">${check.pass ? "✓" : "!"}</span><div><strong>${escapeHtml(check.criterion)}：${check.score}/5</strong><div>${escapeHtml(check.reason)}</div><div class="suggestion">${escapeHtml(check.suggestion)}</div></div></div>`).join("");
+      return `<details class="quality" open><summary><span class="score">${post.quality.overallScore}点</span>品質評価</summary>${checks}</details>`;
+    }
+    function sourcesHtml(post) {
+      const sources = post.sources || [];
+      if (!sources.length) return '<details class="sources"><summary>参照元：0件</summary><p class="fail">参照元がありません。再生成または事実確認が必要です。</p></details>';
+      const items = sources.map((source) => `<li><a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title)}</a> — ${escapeHtml(source.publisher || "発行元不明")}（${escapeHtml(source.publishedAt || "日付不明")}） ${source.verifiedBySearch ? '<span class="verified">検索確認済み</span>' : '<span class="fail">未確認</span>'}<div class="suggestion">${escapeHtml(source.supportedClaim || "対応する主張の記録なし")}</div></li>`).join("");
+      return `<details class="sources"><summary>参照元：${sources.length}件</summary><ol class="source-list">${items}</ol></details>`;
+    }
+    function render() {
+      const root = $("#posts");
+      if (!state.posts.length) { root.innerHTML = '<div class="card empty">まだ投稿がありません。<br>左のフォームから最初の投稿を生成してください。</div>'; return; }
+      root.innerHTML = state.posts.map((post) => {
+        const busy = state.pending.has(post.id);
+        const version = encodeURIComponent(post.updatedAt || "");
+        const canEdit = post.status !== "published";
+        const approveText = post.status === "approved" ? "承認を取り消す" : "承認";
+        const approveAction = post.status === "approved" ? "unapprove" : "approve";
+        return `<article class="card ${busy ? "busy" : ""}"><div class="post-head"><div><h2 class="post-title">${escapeHtml(post.topic)}</h2><div class="meta">${escapeHtml(post.contentTypeLabel || "旧形式")} ・ ${escapeHtml(post.accountName)} ・ ${escapeHtml(post.generationSource)}生成</div></div><span class="pill">${escapeHtml(statusLabel(post.status))}</span></div><div class="slides">${post.assets.map((src, i) => `<img src="${src}?v=${version}" alt="スライド ${i + 1}">`).join("")}</div><div class="caption">${escapeHtml(captionText(post))}</div>${qualityHtml(post)}${sourcesHtml(post)}<div class="actions"><button class="secondary" onclick="toggleApproval('${post.id}','${approveAction}')" ${!["review","approved"].includes(post.status) || busy ? "disabled" : ""}>${approveText}</button><button class="ghost" onclick="openEditor('${post.id}')" ${!canEdit || busy ? "disabled" : ""}>原稿を編集</button><button class="ghost" onclick="regenerate('${post.id}')" ${!canEdit || busy ? "disabled" : ""}>調査から再生成</button><button class="ghost" onclick="downloadPost('${post.id}')" ${busy ? "disabled" : ""}>素材ZIP</button><button class="ghost" onclick="copyCaption('${post.id}')" ${busy ? "disabled" : ""}>キャプションコピー</button><button class="publish" onclick="publishPost('${post.id}')" ${post.status !== "approved" || busy ? "disabled" : ""}>${state.config?.dryRun ? "投稿ドライラン" : "Instagramに投稿"}</button><button class="danger" onclick="deletePost('${post.id}')" ${post.status === "published" || busy ? "disabled" : ""}>削除</button></div></article>`;
+      }).join("");
+    }
+    async function load() {
+      state.config = await request("/api/config"); state.posts = await request("/api/posts");
+      $("#account").innerHTML = state.config.accounts.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
+      $("#contentType").innerHTML = state.config.contentTypes.map((type) => `<option value="${type.id}">${escapeHtml(type.label)}</option>`).join("");
+      $("#mode").textContent = `${state.config.openAIConfigured ? "OpenAI接続済み" : "デモ生成"}・${state.config.dryRun ? "投稿ドライラン" : "実投稿モード"}`; render();
+    }
+    $("#form").addEventListener("submit", async (event) => {
+      event.preventDefault(); const form = event.currentTarget; const button = event.submitter; const data = Object.fromEntries(new FormData(form));
+      button.disabled = true; $("#formStatus").textContent = "Web調査・原稿生成・品質評価・画像生成を実行しています…";
+      try { const post = await request("/api/posts", { method: "POST", body: JSON.stringify(data) }); state.posts.unshift(post); render(); $("#formStatus").innerHTML = '<span class="ok">生成しました。内容を確認して承認してください。</span>'; form.elements.topic.value = ""; }
+      catch (error) { $("#formStatus").textContent = error.message; } finally { button.disabled = false; }
+    });
+    async function toggleApproval(id, action) { setPending(id, true); try { replacePost(await request(`/api/posts/${id}/${action}`, { method: "POST" })); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
+    async function regenerate(id) { if (!confirm("現在の原稿を置き換えて再生成しますか？")) return; setPending(id, true); try { replacePost(await request(`/api/posts/${id}/regenerate`, { method: "POST" })); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
+    async function publishPost(id) { if (!confirm(state.config.dryRun ? "投稿APIのドライランを実行しますか？" : "Instagramに公開しますか？")) return; setPending(id, true); try { replacePost(await request(`/api/posts/${id}/publish`, { method: "POST" })); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
+    function downloadPost(id) { window.location.assign(`/api/posts/${encodeURIComponent(id)}/export`); }
+    async function copyCaption(id) {
+      const post = state.posts.find((item) => item.id === id); if (!post) return;
+      const text = captionText(post);
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const area = document.createElement("textarea"); area.value = text; area.style.position = "fixed"; area.style.opacity = "0"; document.body.appendChild(area); area.select(); document.execCommand("copy"); area.remove();
+      }
+      alert("キャプションをコピーしました。");
+    }
+    async function deletePost(id) { if (!confirm("この投稿を一覧から削除しますか？画像は復旧用フォルダへ移動します。")) return; setPending(id, true); try { await request(`/api/posts/${id}`, { method: "DELETE" }); state.posts = state.posts.filter((post) => post.id !== id); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
+    function openEditor(id) {
+      const post = state.posts.find((item) => item.id === id); if (!post) return;
+      $("#editId").value = post.id; $("#editInternalTitle").value = post.content.title; $("#editHook").value = post.content.hook; $("#editCaption").value = post.content.caption; $("#editHashtags").value = post.content.hashtags.join(" ");
+      $("#slideEditors").innerHTML = post.content.slides.map((slide, index) => `<div class="slide-editor"><strong>スライド ${index + 2}</strong><label>ラベル</label><input class="slide-eyebrow" value="${escapeHtml(slide.eyebrow)}" required><label>見出し</label><input class="slide-title" value="${escapeHtml(slide.title)}" required><label>本文</label><textarea class="slide-body" required>${escapeHtml(slide.body)}</textarea></div>`).join(""); $("#editor").showModal();
+    }
+    function closeEditor() { $("#editor").close(); }
+    $("#editorForm").addEventListener("submit", async (event) => {
+      event.preventDefault(); const id = $("#editId").value; const button = event.submitter;
+      const slides = [...document.querySelectorAll(".slide-editor")].map((node) => ({ eyebrow: node.querySelector(".slide-eyebrow").value, title: node.querySelector(".slide-title").value, body: node.querySelector(".slide-body").value }));
+      const content = { title: $("#editInternalTitle").value, hook: $("#editHook").value, slides, caption: $("#editCaption").value, hashtags: $("#editHashtags").value.split(/\s+/).filter(Boolean) };
+      button.disabled = true; try { const updated = await request(`/api/posts/${id}`, { method: "PUT", body: JSON.stringify({ content }) }); replacePost(updated); closeEditor(); } catch (error) { alert(error.message); } finally { button.disabled = false; }
+    });
+    load().catch((error) => { $("#formStatus").textContent = error.message; });
+  </script>
+</body>
+</html>

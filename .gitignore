@@ -1,0 +1,7 @@
+node_modules/
+.env
+data/posts.json
+data/fonts.conf
+output/*
+!output/.gitkeep
+npm-debug.log*
