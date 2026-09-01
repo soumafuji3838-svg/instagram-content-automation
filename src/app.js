@@ -69,7 +69,7 @@ async function handler(req, res) {
       const contentType = getContentType(body.contentType);
       const id = `${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
       const generated = await generateCarousel({ topic, contentType: contentType.id, targetYear: String(body.targetYear || account.target), notes: String(body.notes || ""), account });
-      const assets = await renderCarousel({ id, content: generated.content, account });
+      const assets = await renderCarousel({ id, topic, contentType: contentType.id, content: generated.content, account });
       const now = new Date().toISOString();
       const post = await createPost({ id, topic, contentType: contentType.id, contentTypeLabel: contentType.label, notes: String(body.notes || ""), accountId: account.id, accountName: account.name, targetYear: body.targetYear || account.target, status: "review", generationSource: generated.source, content: generated.content, sources: generated.sources, quality: generated.quality, assets, createdAt: now, updatedAt: now });
       return json(res, 201, post);
@@ -83,7 +83,7 @@ async function handler(req, res) {
       const content = validateContent(body.content);
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const quality = await evaluateContentQuality({ content, sources: existing.sources || [], topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear });
-      const assets = await renderCarousel({ id: existing.id, content, account });
+      const assets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account });
       const post = await updatePost(existing.id, { content, quality, assets, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       return json(res, 200, post);
     }
@@ -104,7 +104,7 @@ async function handler(req, res) {
       if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const generated = await generateCarousel({ topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear, notes: existing.notes || "", account });
-      const assets = await renderCarousel({ id: existing.id, content: generated.content, account });
+      const assets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: generated.content, account });
       const post = await updatePost(existing.id, { content: generated.content, sources: generated.sources, quality: generated.quality, assets, generationSource: generated.source, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       return json(res, 200, post);
     }

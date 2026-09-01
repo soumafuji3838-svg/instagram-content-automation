@@ -1,10 +1,10 @@
-# Instagram Content Quality MVP v0.4
+# Instagram Content Quality MVP v0.5
 
 テーマを入力すると、日本語のInstagramカルーセル原稿と7枚のPNG画像を生成し、承認後にInstagram Graph APIへ投稿するMVPです。
 
 ## 実装済み
 
-- 複数アカウント設定
+- 「就活研究所（@career_research_center）」のブランド設定
 - OpenAI Responses APIのStructured Outputsによる原稿生成
 - APIキー未設定時のデモ生成
 - 1080×1350pxのカルーセルPNG生成
@@ -23,6 +23,9 @@
 - 検索で確認した参照URL・発行日・対応する主張の保存
 - 7項目の品質評価と100点スコア
 - 参照元と品質評価をZIPへ同梱
+- 写真を使わないネイビー基調の共通カルーセルデザイン
+- 表紙・本文の位置、色、文字サイズを`config/designs.json`で管理
+- 投稿タイプ別CTAと基本ハッシュタグの自動適用
 
 ## 必要環境
 
@@ -75,15 +78,19 @@ Metaが画像を取得するため、`PUBLIC_BASE_URL/output/...` が外部か�
 
 ## アカウント設定
 
-`config/accounts.json` にブランド設定を追加します。
+ブランド情報は`config/accounts.json`、画像テンプレートは`config/designs.json`で管理します。
 
 - `id`: システム内の一意ID
 - `name`: 表示名
+- `instagram`: Instagramユーザー名
 - `target`: 対象卒年
 - `persona`: 想定読者
 - `tone`: 文章トーン
-- `primaryColor` / `secondaryColor`: デザイン色
-- `cta`: 最終ページの行動喚起
+- `designId`: 使用するデザインJSONのID
+- `ctaByContentType`: 投稿タイプ別の行動喚起
+- `hashtags`: 必ず含める基本ハッシュタグ
+
+`config/designs.json`では1080×1350pxのキャンバス、配色、文字、表紙、2枚目以降、フッター帯の位置を管理します。表紙中央のテーマとフックは、投稿生成時に入力内容へ自動的に置き換わります。
 
 ## 動作確認
 

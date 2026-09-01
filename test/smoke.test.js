@@ -1,8 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { wrapJapanese, escapeXml } = require("../src/renderer");
-const { demoContent, validateContent, extractOutputText, buildOpenAIRequest } = require("../src/generator");
+const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, applyAccountRules, resolveCta } = require("../src/generator");
 const { contentTypes } = require("../src/content-types");
+const { getDesign } = require("../src/designs");
 const { extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, QUALITY_CRITERIA } = require("../src/quality");
 const accounts = require("../config/accounts.json");
 
@@ -25,6 +26,32 @@ test("demo carousel has six body slides", () => {
   const content = demoContent({ topic: "面接準備", targetYear: "28卒", account: accounts[0] });
   assert.equal(content.slides.length, 6);
   assert.ok(content.hashtags.every((tag) => tag.startsWith("#")));
+});
+
+test("account branding and CTAs are fixed by content type", () => {
+  assert.equal(accounts.length, 1);
+  assert.equal(accounts[0].name, "就活研究所");
+  assert.equal(accounts[0].instagram, "career_research_center");
+  assert.equal(resolveCta(accounts[0], "industry_report"), "保存して、業界研究の参考にしよう");
+  assert.equal(resolveCta(accounts[0], "company_report"), "保存して、企業研究の参考にしよう");
+  const draft = validateContent({
+    ...demoContent({ topic: "半導体", targetYear: "28・29卒", account: accounts[0], contentType: "industry_report" }),
+    caption: "投稿です。\n\n保存して、あとで見返そう",
+    hashtags: ["#就活ねこ", "#半導体"]
+  });
+  const branded = applyAccountRules(draft, accounts[0], "industry_report");
+  assert.ok(branded.caption.endsWith("保存して、業界研究の参考にしよう"));
+  assert.ok(branded.hashtags.includes("#28卒"));
+  assert.ok(branded.hashtags.includes("#29卒"));
+  assert.ok(!branded.hashtags.includes("#就活ねこ"));
+});
+
+test("photo-free design is defined in JSON", () => {
+  const design = getDesign(accounts[0].designId);
+  assert.equal(design.canvas.width, 1080);
+  assert.equal(design.canvas.height, 1350);
+  assert.equal(design.colors.navy, "#062A55");
+  assert.equal(JSON.stringify(design).includes("image"), false);
 });
 
 test("content validation rejects an invalid slide count", () => {

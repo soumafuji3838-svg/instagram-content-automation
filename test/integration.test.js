@@ -15,7 +15,7 @@ test("create, edit, approve, dry-run, regenerate, and delete", async () => {
     created = await fetch(`${base}/api/posts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ accountId: "career-guide", contentType: "industry_report", targetYear: "28卒", topic: `統合テスト-${Date.now()}`, notes: "数字を使わない" })
+      body: JSON.stringify({ accountId: "career-research-center", contentType: "industry_report", targetYear: "28卒", topic: `統合テスト-${Date.now()}`, notes: "数字を使わない" })
     }).then(async (response) => ({ status: response.status, body: await response.json() }));
     assert.equal(created.status, 201);
     assert.equal(created.body.status, "review");

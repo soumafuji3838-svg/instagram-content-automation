@@ -1,6 +1,38 @@
 const { getContentType } = require("./content-types");
 const { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality } = require("./quality");
 
+const FORBIDDEN_BRAND_PATTERN = /就活ねこ|就活ガイド|（デモ）|\(デモ\)/;
+
+function resolveCta(account, contentType) {
+  return account.ctaByContentType?.[contentType]
+    || account.cta
+    || "保存して、業界研究の参考にしよう";
+}
+
+function applyAccountRules(content, account, contentType) {
+  const cta = resolveCta(account, contentType);
+  const slides = content.slides.map((slide) => ({ ...slide }));
+  slides[slides.length - 1] = { ...slides[slides.length - 1], title: cta };
+  const captionWithoutOldCta = content.caption
+    .split("\n")
+    .filter((line) => !/^保存して[、,]/.test(line.trim()))
+    .join("\n")
+    .replace(/就活ねこ|就活ガイド|（デモ）|\(デモ\)/g, "")
+    .trim();
+  const baseHashtags = Array.isArray(account.hashtags) ? account.hashtags : [];
+  const hashtags = [...baseHashtags, ...content.hashtags]
+    .filter((tag) => !FORBIDDEN_BRAND_PATTERN.test(tag))
+    .map((tag) => tag.trim().replace(/^[#＃]+/, "").replace(/\s+/g, ""))
+    .filter(Boolean)
+    .map((tag) => `#${tag}`);
+  return {
+    ...content,
+    slides,
+    caption: `${captionWithoutOldCta}\n\n${cta}`.trim(),
+    hashtags: [...new Set(hashtags)]
+  };
+}
+
 const contentSchema = {
   type: "object",
   properties: {
@@ -71,19 +103,20 @@ const qualitySchema = {
 function demoContent({ topic, targetYear, account, contentType }) {
   const audience = targetYear || account.target;
   const type = getContentType(contentType);
+  const cta = resolveCta(account, type.id);
   return {
     title: `${type.label}｜${topic}`,
-    hook: `${topic}\n2分でポイント整理`,
+    hook: "なぜ今、注目されているのか？",
     slides: [
       { eyebrow: "01｜概要", title: "まず全体像を確認", body: "対象の定義と、就活で押さえる範囲を最初に整理します。" },
       { eyebrow: "02｜構造", title: "誰に何を提供する？", body: "顧客・提供価値・収益が生まれる流れを分けて確認します。" },
       { eyebrow: "03｜比較", title: "違いは軸で比べる", body: "事業、顧客、強みなど同じ軸にそろえると違いが見えます。" },
       { eyebrow: "04｜変化", title: "直近の変化を調べる", body: "ニュースや公式発表から、最近変わった点と背景を確認します。" },
       { eyebrow: "05｜注意", title: "断定せず根拠を見る", body: "数字や評価は参照元と日付を確認し、事実と解釈を分けます。" },
-      { eyebrow: "NEXT", title: account.cta, body: "参照元を開き、自分の志望理由に使える情報を1つメモしましょう。" }
+      { eyebrow: "NEXT", title: cta, body: "参照元を開き、自分の志望理由に使える情報を1つメモしましょう。" }
     ],
-    caption: `${audience}向けに「${topic}」を${type.label}として整理しました。\n\nデモ生成のため、実際に使う前に最新情報と参照元を確認してください。`,
-    hashtags: [`#${String(audience).replace(/[・\s]/g, "")}`, "#就活", "#業界研究", "#企業研究"]
+    caption: `${audience}向けに「${topic}」を${type.label}として整理しました。\n\nデモ生成のため、実際に使う前に最新情報と参照元を確認してください。\n\n${cta}`,
+    hashtags: account.hashtags || [`#${String(audience).replace(/[・\s]/g, "")}`, "#就活", "#業界研究", "#企業研究"]
   };
 }
 
@@ -132,9 +165,12 @@ function buildOpenAIRequest(input, referenceDate = new Date()) {
       "Separate facts from interpretation. Do not invent rankings, salaries, deadlines, market sizes, or corporate claims.",
       "Write natural Japanese for 28・29卒 students. Avoid abstract advice and include a concrete action on the final slide.",
       "Create exactly 6 body slides; the renderer adds the cover separately.",
+      "The cover renders the input topic separately. Write hook as one concrete question or subheadline and do not repeat the topic in hook.",
       "Keep each slide title under 22 Japanese characters and each body under 80 Japanese characters.",
       "Make every headline understandable without reading the body. Avoid repeating the same fact across slides.",
-      "Hashtags must begin with #."
+      "Hashtags must begin with #.",
+      "Never mention or hashtag 就活ねこ, 就活ガイド, or デモ.",
+      "Use the supplied brand hashtags as the base hashtags and end the caption with the exact supplied call to action."
     ].join("\n"),
     input: JSON.stringify({
       currentDate: today.toISOString().slice(0, 10),
@@ -146,7 +182,8 @@ function buildOpenAIRequest(input, referenceDate = new Date()) {
       accountName: input.account.name,
       persona: input.account.persona,
       tone: input.account.tone,
-      callToAction: input.account.cta,
+      callToAction: resolveCta(input.account, type.id),
+      brandHashtags: input.account.hashtags || [],
       notes: input.notes || ""
     }),
     text: { format: { type: "json_schema", name: "researched_instagram_carousel", strict: true, schema: researchSchema } }
@@ -219,7 +256,7 @@ async function evaluateContentQuality(input, referenceDate = new Date()) {
 async function generateWithOpenAI(input, referenceDate = new Date()) {
   const response = await callOpenAI(buildOpenAIRequest(input, referenceDate));
   const raw = JSON.parse(extractOutputText(response));
-  const content = validateContent(raw.content);
+  const content = applyAccountRules(validateContent(raw.content), input.account, input.contentType);
   const sources = normalizeSources(raw.sources, extractWebEvidence(response));
   const quality = await evaluateContentQuality({ content, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
   return { content, sources, quality };
@@ -227,7 +264,7 @@ async function generateWithOpenAI(input, referenceDate = new Date()) {
 
 async function generateCarousel(input, referenceDate = new Date()) {
   if (!process.env.OPENAI_API_KEY) {
-    const content = validateContent(demoContent(input));
+    const content = applyAccountRules(validateContent(demoContent(input)), input.account, input.contentType);
     return { content, sources: [], quality: normalizeQuality({ checks: [] }, [], referenceDate), source: "demo" };
   }
   return { ...(await generateWithOpenAI(input, referenceDate)), source: "openai-web" };
@@ -243,5 +280,7 @@ module.exports = {
   validateContent,
   extractOutputText,
   buildOpenAIRequest,
-  buildQualityRequest
+  buildQualityRequest,
+  resolveCta,
+  applyAccountRules
 };
