@@ -11,15 +11,27 @@ function storageMode() {
   return "local";
 }
 
-function requireBlobToken() {
-  if (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.VERCEL_OIDC_TOKEN) {
-    throw new Error("Vercel Blobが未設定です。BLOB_READ_WRITE_TOKENをプロジェクトへ接続してください。");
-  }
+function blobClient() {
+  return clientOverride || require("@vercel/blob");
 }
 
-function blobClient() {
-  requireBlobToken();
-  return clientOverride || require("@vercel/blob");
+function credentialsFor(prefix, label) {
+  const token = process.env[`${prefix}_READ_WRITE_TOKEN`];
+  if (token) return { token };
+
+  const oidcToken = process.env.VERCEL_OIDC_TOKEN;
+  const storeId = process.env[`${prefix}_STORE_ID`];
+  if (oidcToken && storeId) return { oidcToken, storeId };
+
+  throw new Error(`${label}が未設定です。${prefix}_STORE_IDを持つBlobストアをプロジェクトへ接続してください。`);
+}
+
+function publicBlobCredentials() {
+  return credentialsFor("BLOB", "公開画像用Vercel Blob");
+}
+
+function privateBlobCredentials() {
+  return credentialsFor("POSTS_BLOB", "投稿データ用Vercel Blob");
 }
 
 function setBlobClientForTests(client) {
@@ -27,7 +39,11 @@ function setBlobClientForTests(client) {
 }
 
 async function readPostsBlob() {
-  const result = await blobClient().get(POSTS_BLOB_PATH, { access: "private", useCache: false });
+  const result = await blobClient().get(POSTS_BLOB_PATH, {
+    access: "private",
+    useCache: false,
+    ...privateBlobCredentials()
+  });
   if (!result || result.statusCode !== 200 || !result.stream) return [];
   const text = await new Response(result.stream).text();
   return text.trim() ? JSON.parse(text) : [];
@@ -38,7 +54,8 @@ async function writePostsBlob(posts) {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
-    contentType: "application/json"
+    contentType: "application/json",
+    ...privateBlobCredentials()
   });
 }
 
@@ -61,7 +78,8 @@ async function persistRenderedAssets(id, assets) {
       access: "public",
       addRandomSuffix: true,
       contentType: "image/png",
-      cacheControlMaxAge: 31536000
+      cacheControlMaxAge: 31536000,
+      ...publicBlobCredentials()
     });
     uploaded.push(result.url);
   }
@@ -80,7 +98,7 @@ function isBlobUrl(value) {
 async function deleteBlobAssets(assets) {
   if (storageMode() !== "blob") return;
   const urls = (assets || []).filter(isBlobUrl);
-  if (urls.length) await blobClient().del(urls);
+  if (urls.length) await blobClient().del(urls, publicBlobCredentials());
 }
 
 async function readAssetBuffer(asset, fetchImpl = fetch) {
@@ -94,6 +112,8 @@ module.exports = {
   POSTS_BLOB_PATH,
   storageMode,
   setBlobClientForTests,
+  publicBlobCredentials,
+  privateBlobCredentials,
   readPostsBlob,
   writePostsBlob,
   persistRenderedAssets,

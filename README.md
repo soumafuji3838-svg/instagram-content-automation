@@ -103,7 +103,14 @@ npm run verify:instagram
 
 ## Vercelへデプロイ
 
-GitHubリポジトリをVercelへImportし、プロジェクトにVercel Blobを接続します。Vercelでは以下の環境変数を設定してください。
+GitHubリポジトリをVercelへImportし、アクセス範囲の異なる2つのVercel Blobストアを接続します。
+
+1. **公開画像用ストア**: Accessを`Public`、環境変数Prefixを`BLOB`にして作成します。
+2. **投稿データ用ストア**: Accessを`Private`、環境変数Prefixを`POSTS_BLOB`にして作成します。
+
+どちらもProductionとPreviewへ接続してください。静的なread-write tokenを使用する場合は、作成画面の「Add a read-write token env var」を有効にします。Vercel OIDCを使用する場合は、各ストアの`*_STORE_ID`と自動提供される`VERCEL_OIDC_TOKEN`で認証されます。
+
+Vercelでは以下の環境変数も設定してください。
 
 ```env
 STORAGE_MODE=blob
@@ -117,7 +124,7 @@ INSTAGRAM_ACCESS_TOKEN=...
 META_GRAPH_API_VERSION=v26.0
 ```
 
-Blob接続時に`BLOB_READ_WRITE_TOKEN`が自動設定されていることを確認してください。管理画面とAPIはBasic認証で保護されます。Instagramへ渡す5枚の画像だけは、Metaが取得できるVercel Blobの公開URLとして保存されます。投稿JSONはBlobの非公開領域に保存されます。
+接続後、公開側の`BLOB_STORE_ID`と非公開側の`POSTS_BLOB_STORE_ID`が設定されていることを確認してください。read-write token方式では、`BLOB_READ_WRITE_TOKEN`と`POSTS_BLOB_READ_WRITE_TOKEN`も必要です。管理画面とAPIはBasic認証で保護されます。Instagramへ渡す5枚の画像だけは、Metaが取得できる公開URLとして保存され、投稿JSONは別の非公開ストアに保存されます。
 
 初回デプロイ後、発行されたURLを次の環境変数へ登録して再デプロイします。
 
