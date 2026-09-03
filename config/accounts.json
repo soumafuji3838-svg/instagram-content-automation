@@ -8,11 +8,11 @@
     "tone": "落ち着いて知的。短く具体的で、根拠のない断定や煽りを避ける",
     "designId": "research-navy-v1",
     "ctaByContentType": {
-      "industry_report": "保存して、業界研究の参考にしよう",
-      "company_report": "保存して、企業研究の参考にしよう",
-      "industry_comparison": "保存して、業界研究の参考にしよう",
-      "company_comparison": "保存して、企業研究の参考にしよう",
-      "trend_report": "保存して、業界研究の参考にしよう"
+      "industry_report": "保存して、業界研究の参考にしてね！",
+      "company_report": "保存して、企業研究の参考にしてね！",
+      "industry_comparison": "保存して、業界研究の参考にしてね！",
+      "company_comparison": "保存して、企業研究の参考にしてね！",
+      "trend_report": "保存して、業界研究の参考にしてね！"
     },
     "hashtags": ["#28卒", "#29卒", "#就活", "#業界研究", "#企業研究"]
   }

@@ -9,12 +9,19 @@ const { contentTypes, getContentType } = require("./content-types");
 const { renderCarousel } = require("./renderer");
 const { publishCarousel } = require("./instagram");
 const { streamPostExport } = require("./exporter");
+const { fetchCoverPhoto } = require("./photo");
+const { publicationGate } = require("./quality");
 
 loadEnv();
 
 const root = process.cwd();
 const accounts = require(path.join(root, "config", "accounts.json"));
 const mimeTypes = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".json": "application/json; charset=utf-8" };
+
+async function readLogoMetadata(id) {
+  try { return JSON.parse(await fs.readFile(path.join(root, "output", id, "logos.json"), "utf8")); }
+  catch { return {}; }
+}
 
 function json(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -50,7 +57,13 @@ async function handler(req, res) {
   const url = new URL(req.url, "http://localhost");
   try {
     if (req.method === "GET" && url.pathname === "/api/config") {
-      return json(res, 200, { accounts, contentTypes, dryRun: process.env.INSTAGRAM_DRY_RUN !== "false", openAIConfigured: Boolean(process.env.OPENAI_API_KEY) });
+      return json(res, 200, {
+        accounts,
+        contentTypes,
+        dryRun: process.env.INSTAGRAM_DRY_RUN !== "false",
+        openAIConfigured: Boolean(process.env.OPENAI_API_KEY),
+        pexelsConfigured: Boolean(process.env.PEXELS_API_KEY)
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/posts") return json(res, 200, await listPosts());
 
@@ -69,9 +82,11 @@ async function handler(req, res) {
       const contentType = getContentType(body.contentType);
       const id = `${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
       const generated = await generateCarousel({ topic, contentType: contentType.id, targetYear: String(body.targetYear || account.target), notes: String(body.notes || ""), account });
-      const assets = await renderCarousel({ id, topic, contentType: contentType.id, content: generated.content, account });
+      const coverPhoto = await fetchCoverPhoto(generated.content.imageQuery);
+      const assets = await renderCarousel({ id, topic, contentType: contentType.id, content: generated.content, account, coverPhoto });
+      const companyLogos = await readLogoMetadata(id);
       const now = new Date().toISOString();
-      const post = await createPost({ id, topic, contentType: contentType.id, contentTypeLabel: contentType.label, notes: String(body.notes || ""), accountId: account.id, accountName: account.name, targetYear: body.targetYear || account.target, status: "review", generationSource: generated.source, content: generated.content, sources: generated.sources, quality: generated.quality, assets, createdAt: now, updatedAt: now });
+      const post = await createPost({ id, topic, contentType: contentType.id, contentTypeLabel: contentType.label, notes: String(body.notes || ""), accountId: account.id, accountName: account.name, targetYear: body.targetYear || account.target, status: "review", generationSource: generated.source, content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, createdAt: now, updatedAt: now });
       return json(res, 201, post);
     }
 
@@ -80,11 +95,12 @@ async function handler(req, res) {
       const existing = await getPost(postMatch[1]);
       if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
       const body = await readBody(req);
-      const content = validateContent(body.content);
+      const content = validateContent(body.content, existing.contentType);
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const quality = await evaluateContentQuality({ content, sources: existing.sources || [], topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear });
       const assets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account });
-      const post = await updatePost(existing.id, { content, quality, assets, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      const companyLogos = await readLogoMetadata(existing.id);
+      const post = await updatePost(existing.id, { content, companyLogos, quality, assets, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       return json(res, 200, post);
     }
 
@@ -104,13 +120,19 @@ async function handler(req, res) {
       if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const generated = await generateCarousel({ topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear, notes: existing.notes || "", account });
-      const assets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: generated.content, account });
-      const post = await updatePost(existing.id, { content: generated.content, sources: generated.sources, quality: generated.quality, assets, generationSource: generated.source, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      const coverPhoto = await fetchCoverPhoto(generated.content.imageQuery);
+      const assets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: generated.content, account, coverPhoto });
+      const companyLogos = await readLogoMetadata(existing.id);
+      const post = await updatePost(existing.id, { content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, generationSource: generated.source, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       return json(res, 200, post);
     }
 
     const approveMatch = url.pathname.match(/^\/api\/posts\/([^/]+)\/approve$/);
     if (req.method === "POST" && approveMatch) {
+      const existing = await getPost(approveMatch[1]);
+      if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
+      const gate = publicationGate(existing.quality, existing.content, existing.sources || [], existing.companyLogos || {});
+      if (existing.generationSource !== "demo" && !gate.ready) return json(res, 409, { error: `公開基準を満たしていません。 ${gate.failed.join(" ")}` });
       const post = await updatePost(approveMatch[1], { status: "approved", approvedAt: new Date().toISOString() });
       return post ? json(res, 200, post) : json(res, 404, { error: "投稿が見つかりません。" });
     }

@@ -11,7 +11,7 @@
 <body>
   <main class="shell">
     <header class="top">
-      <div><div class="eyebrow">就活研究所｜Content Quality MVP v0.5</div><h1>Instagram<br>Research Studio</h1><p class="lead">Web調査から原稿・参照元・品質評価・7枚の画像まで生成します。</p></div>
+      <div><div class="eyebrow">就活研究所｜Content Quality MVP v0.7</div><h1>Instagram<br>Research Studio</h1><p class="lead">IRの事実を就活生向けに読み解き、参照元・品質評価・5枚の画像まで生成します。</p></div>
       <div id="mode" class="badge">設定を確認中…</div>
     </header>
     <div class="grid">
@@ -32,9 +32,13 @@
     <form id="editorForm" class="dialog-body">
       <div class="dialog-head"><h2>投稿原稿を編集</h2><button type="button" class="close" onclick="closeEditor()" aria-label="閉じる">×</button></div>
       <input type="hidden" id="editId">
-      <label for="editInternalTitle">管理用タイトル</label><input id="editInternalTitle" required>
-      <label for="editHook">表紙サブタイトル</label><textarea id="editHook" required></textarea>
-      <div id="slideEditors"></div>
+      <label for="editInternalTitle">表紙タイトル（H1）</label><input id="editInternalTitle" required>
+      <label for="editSubtitle">表紙サブタイトル（H2）</label><textarea id="editSubtitle" required></textarea>
+      <label for="editImageQuery">フリー素材検索キーワード（英語）</label><input id="editImageQuery" required>
+      <label for="editSubjectName">調査対象名（管理用）</label><input id="editSubjectName" required>
+      <label for="editSubjectType">調査対象の種類</label><select id="editSubjectType"><option value="company">企業（表紙にロゴ表示）</option><option value="industry">業界</option><option value="topic">トレンド・テーマ</option></select>
+      <label for="editSubjectDomain">企業公式ドメイン</label><input id="editSubjectDomain" placeholder="example.co.jp">
+      <div id="structuredEditors"></div>
       <label for="editCaption">キャプション</label><textarea id="editCaption" required></textarea>
       <label for="editHashtags">ハッシュタグ（空白区切り）</label><input id="editHashtags" required>
       <div class="dialog-actions"><button type="button" class="ghost" onclick="closeEditor()">キャンセル</button><button type="submit" class="publish">保存して画像を再生成</button></div>
@@ -54,8 +58,9 @@
     function replacePost(updated) { state.posts = state.posts.map((post) => post.id === updated.id ? updated : post); render(); }
     function statusLabel(status) { return ({review:"確認待ち",approved:"承認済み",dry_run_complete:"ドライラン完了",published:"投稿済み"})[status] || status; }
     function captionText(post) {
-      const sourceNotes = (post.sources || []).slice(0, 5).map((source, index) => `${index + 1}. ${source.publisher || source.title}（${source.publishedAt || "日付不明"}）`);
-      return `${post.content.caption}\n\n${post.content.hashtags.join(" ")}${sourceNotes.length ? `\n\n【参照】\n${sourceNotes.join("\n")}` : ""}`.trim();
+      const sourceNotes = (post.sources || []).slice(0, 8).map((source, index) => `${source.id || `S${index + 1}`}. ${source.publisher || source.title}（${source.publishedAt || "日付不明"}）`);
+      const photoCredit = post.coverPhoto?.status === "ready" ? `\n\nPhoto by ${post.coverPhoto.photographer} on Pexels` : "";
+      return `${post.content.caption}\n\n${post.content.hashtags.join(" ")}${sourceNotes.length ? `\n\n【参照】\n${sourceNotes.join("\n")}` : ""}${photoCredit}`.trim();
     }
     function qualityHtml(post) {
       if (!post.quality) return '<div class="quality"><strong>品質評価：</strong>旧データのため未評価です。再生成すると評価されます。</div>';
@@ -65,8 +70,21 @@
     function sourcesHtml(post) {
       const sources = post.sources || [];
       if (!sources.length) return '<details class="sources"><summary>参照元：0件</summary><p class="fail">参照元がありません。再生成または事実確認が必要です。</p></details>';
-      const items = sources.map((source) => `<li><a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title)}</a> — ${escapeHtml(source.publisher || "発行元不明")}（${escapeHtml(source.publishedAt || "日付不明")}） ${source.verifiedBySearch ? '<span class="verified">検索確認済み</span>' : '<span class="fail">未確認</span>'}<div class="suggestion">${escapeHtml(source.supportedClaim || "対応する主張の記録なし")}</div></li>`).join("");
+      const items = sources.map((source, index) => `<li><strong>${escapeHtml(source.id || `S${index + 1}`)}</strong> <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title)}</a> — ${escapeHtml(source.publisher || "発行元不明")}（${escapeHtml(source.publishedAt || "日付不明")}） ${source.verifiedBySearch ? '<span class="verified">検索確認済み</span>' : '<span class="fail">未確認</span>'}<div class="suggestion">${escapeHtml(source.supportedClaim || "対応する主張の記録なし")}</div></li>`).join("");
       return `<details class="sources"><summary>参照元：${sources.length}件</summary><ol class="source-list">${items}</ol></details>`;
+    }
+    function photoHtml(post) {
+      const photo = post.coverPhoto;
+      if (photo?.status === "ready") return `<details class="sources"><summary>表紙写真：Pexels</summary><p>Photo by <a href="${escapeHtml(photo.photographerUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(photo.photographer)}</a> on <a href="https://www.pexels.com" target="_blank" rel="noopener noreferrer">Pexels</a>｜<a href="${escapeHtml(photo.sourceUrl)}" target="_blank" rel="noopener noreferrer">写真を確認</a></p></details>`;
+      if (photo?.status === "failed") return `<div class="sources fail">表紙写真を取得できませんでした：${escapeHtml(photo.error || "Pexels APIを確認してください")}</div>`;
+      return '<div class="sources suggestion">表紙は仮画像です。写真の自動配置には.envのPEXELS_API_KEYを設定してください。｜<a href="https://www.pexels.com/api/" target="_blank" rel="noopener noreferrer">Pexels API</a></div>';
+    }
+    function logoHtml(post) {
+      const logos = Object.values(post.companyLogos || {});
+      if (!logos.length) return "";
+      const ready = logos.filter((logo) => ["ready", "cached"].includes(logo.status)).length;
+      const failed = logos.length - ready;
+      return `<div class="sources ${failed ? "fail" : "ok"}">企業ロゴ：${ready}/${logos.length}件取得${failed ? "｜未取得のロゴは汎用アイコンです。原稿編集で公式ドメインを確認してください。" : ""}</div>`;
     }
     function render() {
       const root = $("#posts");
@@ -74,17 +92,18 @@
       root.innerHTML = state.posts.map((post) => {
         const busy = state.pending.has(post.id);
         const version = encodeURIComponent(post.updatedAt || "");
-        const canEdit = post.status !== "published";
+        const canEdit = post.status !== "published" && Boolean(post.content.quantitative);
+        const canRegenerate = post.status !== "published";
         const approveText = post.status === "approved" ? "承認を取り消す" : "承認";
         const approveAction = post.status === "approved" ? "unapprove" : "approve";
-        return `<article class="card ${busy ? "busy" : ""}"><div class="post-head"><div><h2 class="post-title">${escapeHtml(post.topic)}</h2><div class="meta">${escapeHtml(post.contentTypeLabel || "旧形式")} ・ ${escapeHtml(post.accountName)} ・ ${escapeHtml(post.generationSource)}生成</div></div><span class="pill">${escapeHtml(statusLabel(post.status))}</span></div><div class="slides">${post.assets.map((src, i) => `<img src="${src}?v=${version}" alt="スライド ${i + 1}">`).join("")}</div><div class="caption">${escapeHtml(captionText(post))}</div>${qualityHtml(post)}${sourcesHtml(post)}<div class="actions"><button class="secondary" onclick="toggleApproval('${post.id}','${approveAction}')" ${!["review","approved"].includes(post.status) || busy ? "disabled" : ""}>${approveText}</button><button class="ghost" onclick="openEditor('${post.id}')" ${!canEdit || busy ? "disabled" : ""}>原稿を編集</button><button class="ghost" onclick="regenerate('${post.id}')" ${!canEdit || busy ? "disabled" : ""}>調査から再生成</button><button class="ghost" onclick="downloadPost('${post.id}')" ${busy ? "disabled" : ""}>素材ZIP</button><button class="ghost" onclick="copyCaption('${post.id}')" ${busy ? "disabled" : ""}>キャプションコピー</button><button class="publish" onclick="publishPost('${post.id}')" ${post.status !== "approved" || busy ? "disabled" : ""}>${state.config?.dryRun ? "投稿ドライラン" : "Instagramに投稿"}</button><button class="danger" onclick="deletePost('${post.id}')" ${post.status === "published" || busy ? "disabled" : ""}>削除</button></div></article>`;
+        return `<article class="card ${busy ? "busy" : ""}"><div class="post-head"><div><h2 class="post-title">${escapeHtml(post.topic)}</h2><div class="meta">${escapeHtml(post.contentTypeLabel || "旧形式")} ・ ${escapeHtml(post.accountName)} ・ ${escapeHtml(post.generationSource)}生成</div></div><span class="pill">${escapeHtml(statusLabel(post.status))}</span></div><div class="slides">${post.assets.map((src, i) => `<img src="${src}?v=${version}" alt="スライド ${i + 1}">`).join("")}</div><div class="caption">${escapeHtml(captionText(post))}</div>${photoHtml(post)}${logoHtml(post)}${qualityHtml(post)}${sourcesHtml(post)}<div class="actions"><button class="secondary" onclick="toggleApproval('${post.id}','${approveAction}')" ${!["review","approved"].includes(post.status) || busy ? "disabled" : ""}>${approveText}</button><button class="ghost" onclick="openEditor('${post.id}')" ${!canEdit || busy ? "disabled" : ""}>原稿を編集</button><button class="ghost" onclick="regenerate('${post.id}')" ${!canRegenerate || busy ? "disabled" : ""}>調査から再生成</button><button class="ghost" onclick="downloadPost('${post.id}')" ${busy ? "disabled" : ""}>素材ZIP</button><button class="ghost" onclick="copyCaption('${post.id}')" ${busy ? "disabled" : ""}>キャプションコピー</button><button class="publish" onclick="publishPost('${post.id}')" ${post.status !== "approved" || busy ? "disabled" : ""}>${state.config?.dryRun ? "投稿ドライラン" : "Instagramに投稿"}</button><button class="danger" onclick="deletePost('${post.id}')" ${post.status === "published" || busy ? "disabled" : ""}>削除</button></div></article>`;
       }).join("");
     }
     async function load() {
       state.config = await request("/api/config"); state.posts = await request("/api/posts");
       $("#account").innerHTML = state.config.accounts.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
       $("#contentType").innerHTML = state.config.contentTypes.map((type) => `<option value="${type.id}">${escapeHtml(type.label)}</option>`).join("");
-      $("#mode").textContent = `${state.config.openAIConfigured ? "OpenAI接続済み" : "デモ生成"}・${state.config.dryRun ? "投稿ドライラン" : "実投稿モード"}`; render();
+      $("#mode").textContent = `${state.config.openAIConfigured ? "OpenAI接続済み" : "デモ生成"}・${state.config.pexelsConfigured ? "表紙写真接続済み" : "表紙は仮画像"}・${state.config.dryRun ? "投稿ドライラン" : "実投稿モード"}`; render();
     }
     $("#form").addEventListener("submit", async (event) => {
       event.preventDefault(); const form = event.currentTarget; const button = event.submitter; const data = Object.fromEntries(new FormData(form));
@@ -109,14 +128,22 @@
     async function deletePost(id) { if (!confirm("この投稿を一覧から削除しますか？画像は復旧用フォルダへ移動します。")) return; setPending(id, true); try { await request(`/api/posts/${id}`, { method: "DELETE" }); state.posts = state.posts.filter((post) => post.id !== id); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
     function openEditor(id) {
       const post = state.posts.find((item) => item.id === id); if (!post) return;
-      $("#editId").value = post.id; $("#editInternalTitle").value = post.content.title; $("#editHook").value = post.content.hook; $("#editCaption").value = post.content.caption; $("#editHashtags").value = post.content.hashtags.join(" ");
-      $("#slideEditors").innerHTML = post.content.slides.map((slide, index) => `<div class="slide-editor"><strong>スライド ${index + 2}</strong><label>ラベル</label><input class="slide-eyebrow" value="${escapeHtml(slide.eyebrow)}" required><label>見出し</label><input class="slide-title" value="${escapeHtml(slide.title)}" required><label>本文</label><textarea class="slide-body" required>${escapeHtml(slide.body)}</textarea></div>`).join(""); $("#editor").showModal();
+      const c = post.content; $("#editId").value = post.id; $("#editInternalTitle").value = c.title; $("#editSubtitle").value = c.subtitle; $("#editImageQuery").value = c.imageQuery; $("#editSubjectName").value = c.subject.name; $("#editSubjectType").value = c.subject.entityType; $("#editSubjectDomain").value = c.subject.domain || ""; $("#editCaption").value = c.caption; $("#editHashtags").value = c.hashtags.join(" ");
+      const metrics = c.quantitative.metrics.map((metric, i) => `<div class="slide-editor metric-editor" data-index="${i}"><strong>グラフ ${i + 1}</strong><label>項目</label><input class="metric-label" value="${escapeHtml(metric.label)}" required><label>項目の種類</label><select class="metric-type"><option value="company" ${metric.entityType === "company" ? "selected" : ""}>企業（ロゴ表示）</option><option value="other" ${metric.entityType !== "company" ? "selected" : ""}>企業以外（文字表示）</option></select><label>企業公式ドメイン</label><input class="metric-domain" value="${escapeHtml(metric.companyDomain || "")}" placeholder="example.co.jp"><label>表示値</label><input class="metric-display" value="${escapeHtml(metric.displayValue)}" required><label>棒の相対値（0〜100）</label><input class="metric-value" type="number" min="0" max="100" value="${escapeHtml(metric.value)}" required></div>`).join("");
+      const columns = c.comparison.columns.map((column, i) => `<div class="slide-editor comparison-column-editor"><strong>比較対象 ${i + 1}</strong><label>名称（管理・読み上げ用）</label><input class="comparison-column-name" value="${escapeHtml(column.name)}" required><label>種類</label><select class="comparison-column-type"><option value="company" ${column.entityType === "company" ? "selected" : ""}>企業（ロゴ表示）</option><option value="industry" ${column.entityType === "industry" ? "selected" : ""}>業界（文字表示）</option></select><label>企業公式ドメイン</label><input class="comparison-column-domain" value="${escapeHtml(column.domain || "")}" placeholder="example.co.jp"></div>`).join("");
+      const rows = c.comparison.rows.map((row, i) => `<div class="slide-editor comparison-row" data-index="${i}"><strong>${escapeHtml(row.label)}</strong>${row.values.map((value) => `<input class="comparison-value" value="${escapeHtml(value)}" required>`).join("")}</div>`).join("");
+      $("#structuredEditors").innerHTML = `<div class="slide-editor"><strong>2枚目｜IR定量要約</strong><label>グラフタイトル</label><input id="editChartTitle" value="${escapeHtml(c.quantitative.chartTitle)}" required><label>単位</label><input id="editChartUnit" value="${escapeHtml(c.quantitative.chartUnit)}" required>${metrics}<label>要約見出し（10文字以内）</label><input id="editQuantTitle" value="${escapeHtml(c.quantitative.summaryTitle)}" required><label>事実要約（約100文字）</label><textarea id="editQuantText" required>${escapeHtml(c.quantitative.summaryText)}</textarea><label>就活への示唆の軸</label><select id="editQuantAxis">${["働き方","挑戦機会","社員還元","将来のキャリア"].map((axis) => `<option ${axis === c.quantitative.insightAxis ? "selected" : ""}>${axis}</option>`).join("")}</select><label>就活への示唆（45〜70文字）</label><textarea id="editQuantInsight" required>${escapeHtml(c.quantitative.studentInsight)}</textarea></div><div class="slide-editor"><strong>3枚目｜IR定性要約</strong><label>${escapeHtml(c.qualitative.positiveLabel)}見出し</label><input id="editPositiveTitle" value="${escapeHtml(c.qualitative.positiveTitle)}" required><label>${escapeHtml(c.qualitative.positiveLabel)}説明</label><textarea id="editPositiveText" required>${escapeHtml(c.qualitative.positiveText)}</textarea><label>${escapeHtml(c.qualitative.negativeLabel)}見出し</label><input id="editNegativeTitle" value="${escapeHtml(c.qualitative.negativeTitle)}" required><label>${escapeHtml(c.qualitative.negativeLabel)}説明</label><textarea id="editNegativeText" required>${escapeHtml(c.qualitative.negativeText)}</textarea><label>見通し見出し</label><input id="editOutlookTitle" value="${escapeHtml(c.qualitative.outlookTitle)}" required><label>見通し説明</label><textarea id="editOutlookText" required>${escapeHtml(c.qualitative.outlookText)}</textarea><label>就活への示唆の軸</label><select id="editQualAxis">${["働き方","挑戦機会","社員還元","将来のキャリア"].map((axis) => `<option ${axis === c.qualitative.insightAxis ? "selected" : ""}>${axis}</option>`).join("")}</select><label>就活への示唆（45〜70文字）</label><textarea id="editQualInsight" required>${escapeHtml(c.qualitative.studentInsight)}</textarea></div><div class="slide-editor"><strong>4枚目｜比較</strong>${columns}${rows}</div><div class="slide-editor"><strong>5枚目｜アクション</strong><label>CTA</label><input id="editCtaTitle" value="${escapeHtml(c.cta.title)}" required><label>補足</label><textarea id="editCtaBody" required>${escapeHtml(c.cta.body)}</textarea></div>`; $("#editor").showModal();
     }
     function closeEditor() { $("#editor").close(); }
     $("#editorForm").addEventListener("submit", async (event) => {
       event.preventDefault(); const id = $("#editId").value; const button = event.submitter;
-      const slides = [...document.querySelectorAll(".slide-editor")].map((node) => ({ eyebrow: node.querySelector(".slide-eyebrow").value, title: node.querySelector(".slide-title").value, body: node.querySelector(".slide-body").value }));
-      const content = { title: $("#editInternalTitle").value, hook: $("#editHook").value, slides, caption: $("#editCaption").value, hashtags: $("#editHashtags").value.split(/\s+/).filter(Boolean) };
+      const original = structuredClone(state.posts.find((post) => post.id === id).content);
+      original.title = $("#editInternalTitle").value; original.subtitle = $("#editSubtitle").value; original.imageQuery = $("#editImageQuery").value; original.subject = { name: $("#editSubjectName").value, entityType: $("#editSubjectType").value, domain: $("#editSubjectDomain").value }; original.caption = $("#editCaption").value; original.hashtags = $("#editHashtags").value.split(/\s+/).filter(Boolean);
+      original.quantitative.chartTitle = $("#editChartTitle").value; original.quantitative.chartUnit = $("#editChartUnit").value; original.quantitative.summaryTitle = $("#editQuantTitle").value; original.quantitative.summaryText = $("#editQuantText").value; original.quantitative.insightAxis = $("#editQuantAxis").value; original.quantitative.studentInsight = $("#editQuantInsight").value;
+      original.quantitative.metrics = [...document.querySelectorAll(".metric-editor")].map((node, index) => ({ ...original.quantitative.metrics[index], label: node.querySelector(".metric-label").value, entityType: node.querySelector(".metric-type").value, companyDomain: node.querySelector(".metric-domain").value, displayValue: node.querySelector(".metric-display").value, value: Number(node.querySelector(".metric-value").value) }));
+      original.qualitative.positiveTitle = $("#editPositiveTitle").value; original.qualitative.positiveText = $("#editPositiveText").value; original.qualitative.negativeTitle = $("#editNegativeTitle").value; original.qualitative.negativeText = $("#editNegativeText").value; original.qualitative.outlookTitle = $("#editOutlookTitle").value; original.qualitative.outlookText = $("#editOutlookText").value; original.qualitative.insightAxis = $("#editQualAxis").value; original.qualitative.studentInsight = $("#editQualInsight").value;
+      original.comparison.columns = [...document.querySelectorAll(".comparison-column-editor")].map((node) => ({ name: node.querySelector(".comparison-column-name").value, entityType: node.querySelector(".comparison-column-type").value, domain: node.querySelector(".comparison-column-domain").value })); original.comparison.rows = [...document.querySelectorAll(".comparison-row")].map((node, index) => ({ ...original.comparison.rows[index], values: [...node.querySelectorAll(".comparison-value")].map((input) => input.value) })); original.cta.title = $("#editCtaTitle").value; original.cta.body = $("#editCtaBody").value;
+      const content = original;
       button.disabled = true; try { const updated = await request(`/api/posts/${id}`, { method: "PUT", body: JSON.stringify({ content }) }); replacePost(updated); closeEditor(); } catch (error) { alert(error.message); } finally { button.disabled = false; }
     });
     load().catch((error) => { $("#formStatus").textContent = error.message; });

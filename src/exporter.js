@@ -19,13 +19,25 @@ function postInfo(post) {
 function referencesText(post) {
   if (!post.sources?.length) return "No references recorded.\n";
   return post.sources.map((source, index) => [
-    `${index + 1}. ${source.title}`,
+    `${source.id || `S${index + 1}`}. ${source.title}`,
     `Publisher: ${source.publisher || "Unknown"}`,
     `Published: ${source.publishedAt || "Unknown"}`,
     `URL: ${source.url}`,
     `Supports: ${source.supportedClaim || "Not recorded"}`,
     `Verified by web search: ${source.verifiedBySearch ? "Yes" : "No"}`
   ].join("\n")).join("\n\n") + "\n";
+}
+
+function photoCreditText(post) {
+  const photo = post.coverPhoto;
+  if (!photo || photo.status !== "ready") return "No cover photo recorded.\n";
+  return [
+    `Provider: ${photo.provider}`,
+    `Photographer: ${photo.photographer}`,
+    `Photographer URL: ${photo.photographerUrl}`,
+    `Photo URL: ${photo.sourceUrl}`,
+    `Search query: ${photo.query}`
+  ].join("\n") + "\n";
 }
 
 async function streamPostExport(post, res) {
@@ -54,6 +66,9 @@ async function streamPostExport(post, res) {
   archive.append(`${captionFor(post)}\n`, { name: "caption.txt" });
   archive.append(postInfo(post), { name: "post-info.txt" });
   archive.append(referencesText(post), { name: "references.txt" });
+  archive.append(photoCreditText(post), { name: "photo-credit.txt" });
+  archive.append(`${JSON.stringify(post.coverPhoto || null, null, 2)}\n`, { name: "photo.json" });
+  archive.append(`${JSON.stringify(post.companyLogos || {}, null, 2)}\n`, { name: "logos.json" });
   archive.append(`${JSON.stringify(post.quality || null, null, 2)}\n`, { name: "quality.json" });
   archive.append(`${JSON.stringify({
     id: post.id,
@@ -67,10 +82,12 @@ async function streamPostExport(post, res) {
     updatedAt: post.updatedAt,
     content: post.content,
     sources: post.sources,
+    coverPhoto: post.coverPhoto,
+    companyLogos: post.companyLogos,
     quality: post.quality
   }, null, 2)}\n`, { name: "post.json" });
 
   await archive.finalize();
 }
 
-module.exports = { streamPostExport, postInfo, referencesText };
+module.exports = { streamPostExport, postInfo, referencesText, photoCreditText };

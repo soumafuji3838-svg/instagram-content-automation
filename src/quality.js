@@ -55,11 +55,12 @@ function normalizeSources(rawSources, evidence = { citations: [], consultedUrls:
   const citationMap = new Map((evidence.citations || []).map((item) => [normalizeUrl(item.url), item]));
   const consulted = new Set((evidence.consultedUrls || []).map(normalizeUrl).filter(Boolean));
   const normalized = [];
-  for (const source of rawSources || []) {
+  for (const [index, source] of (rawSources || []).entries()) {
     const url = normalizeUrl(source?.url);
     if (!url) continue;
     const citation = citationMap.get(url);
     normalized.push({
+      id: String(source.id || `S${index + 1}`).trim(),
       title: String(source.title || citation?.title || "参照元").trim(),
       publisher: String(source.publisher || "").trim(),
       url,
@@ -71,10 +72,69 @@ function normalizeSources(rawSources, evidence = { citations: [], consultedUrls:
   for (const citation of evidence.citations || []) {
     const url = normalizeUrl(citation.url);
     if (url && !normalized.some((source) => source.url === url)) {
-      normalized.push({ title: citation.title, publisher: "", url, publishedAt: "", supportedClaim: "", verifiedBySearch: true });
+      normalized.push({ id: `S${normalized.length + 1}`, title: citation.title, publisher: "", url, publishedAt: "", supportedClaim: "", verifiedBySearch: true });
     }
   }
   return normalized.filter((source, index, list) => list.findIndex((item) => item.url === source.url) === index);
+}
+
+function textLength(value) {
+  return Array.from(String(value || "").trim()).length;
+}
+
+function structureChecks(content, sources = []) {
+  const failed = [];
+  if (!content) return ["5枚構成の原稿データがありません。"]; 
+  const within = (value, min, max, label) => {
+    const length = textLength(value);
+    if (length < min || length > max) failed.push(`${label}は${min}〜${max}文字にしてください（現在${length}文字）。`);
+  };
+  const heading = (value, label) => {
+    const length = textLength(value);
+    if (!length || length > 10) failed.push(`${label}は1〜10文字にしてください（現在${length}文字）。`);
+  };
+  heading(content.quantitative?.summaryTitle, "定量要約の見出し");
+  within(content.quantitative?.summaryText, 90, 110, "定量要約の本文");
+  within(content.quantitative?.studentInsight, 45, 70, "定量情報の就活への示唆");
+  heading(content.qualitative?.positiveTitle, `${content.qualitative?.positiveLabel || "強み・メリット"}の見出し`);
+  within(content.qualitative?.positiveText, 45, 60, `${content.qualitative?.positiveLabel || "強み・メリット"}の本文`);
+  heading(content.qualitative?.negativeTitle, `${content.qualitative?.negativeLabel || "弱み・リスク"}の見出し`);
+  within(content.qualitative?.negativeText, 45, 60, `${content.qualitative?.negativeLabel || "弱み・リスク"}の本文`);
+  heading(content.qualitative?.outlookTitle, "将来見通しの見出し");
+  within(content.qualitative?.outlookText, 80, 100, "将来見通しの本文");
+  within(content.qualitative?.studentInsight, 45, 70, "定性情報の就活への示唆");
+  if (content.subject?.entityType === "company" && !content.subject.domain) failed.push("企業レポートの表紙ロゴ用に公式ドメインが必要です。");
+  if (content.subject?.entityType === "company" && content.subject.name && String(content.title || "").includes(content.subject.name)) failed.push("企業レポートの表紙タイトルから企業名を外し、企業名はロゴで表示してください。");
+  if ((content.quantitative?.metrics || []).some((metric) => metric.entityType === "company" && !metric.companyDomain)) failed.push("企業別グラフの各企業に公式ドメインが必要です。");
+  if ((content.comparison?.columns || []).some((column) => column.entityType === "company" && !column.domain)) failed.push("企業比較の各企業に公式ドメインが必要です。");
+
+  const knownSourceIds = new Set((sources || []).map((source) => source.id).filter(Boolean));
+  const references = [
+    ...(content.quantitative?.sourceIds || []),
+    ...(content.quantitative?.metrics || []).flatMap((metric) => metric.sourceIds || []),
+    ...(content.qualitative?.sourceIds || []),
+    ...(content.comparison?.rows || []).flatMap((row) => row.sourceIds || [])
+  ];
+  if (!references.length) failed.push("各ページに出典IDを紐付けてください。");
+  const unknown = [...new Set(references.filter((id) => !knownSourceIds.has(id)))];
+  if (unknown.length) failed.push(`存在しない出典IDがあります：${unknown.join("、")}`);
+  if ((content.quantitative?.metrics || []).some((metric) => !(metric.sourceIds || []).length)) failed.push("定量グラフの各数値に出典IDが必要です。");
+  if ((content.comparison?.rows || []).some((row) => !(row.sourceIds || []).length)) failed.push("比較表の各行に出典IDが必要です。");
+  return [...new Set(failed)];
+}
+
+function publicationGate(quality, content, sources, companyLogos = {}) {
+  const checks = quality?.checks || [];
+  const failed = [];
+  if (!quality || quality.overallScore < 85) failed.push("総合評価が85点未満です。");
+  for (const check of checks) {
+    if (check.score < 4 || !check.pass) failed.push(`${check.criterion}が公開基準を満たしていません。`);
+  }
+  if (checks.length !== QUALITY_CRITERIA.length) failed.push("品質評価7項目がそろっていません。");
+  if (content) failed.push(...structureChecks(content, sources));
+  const failedLogos = Object.values(companyLogos || {}).filter((logo) => !["ready", "cached"].includes(logo?.status));
+  if (failedLogos.length) failed.push("取得できていない企業ロゴがあります。公式ドメインを確認してください。");
+  return { ready: failed.length === 0, failed: [...new Set(failed)] };
 }
 
 function sourceChecks(sources, referenceDate = new Date()) {
@@ -124,4 +184,4 @@ function normalizeQuality(rawQuality, sources, referenceDate = new Date()) {
   return { overallScore, checks, evaluatedAt: new Date(referenceDate).toISOString() };
 }
 
-module.exports = { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality };
+module.exports = { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, textLength, structureChecks, publicationGate };

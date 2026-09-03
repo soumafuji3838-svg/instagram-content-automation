@@ -1,13 +1,14 @@
 {
   "name": "instagram-carousel-mvp",
-  "version": "0.5.0",
+  "version": "0.8.0",
   "private": true,
   "description": "Instagram carousel generation, approval, and publishing MVP",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
     "demo": "node scripts/demo.js",
-    "test": "node --test"
+    "test": "node --test",
+    "verify:instagram": "node scripts/verify-instagram.js"
   },
   "engines": {
     "node": ">=22"

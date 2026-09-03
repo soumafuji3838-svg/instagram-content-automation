@@ -2,7 +2,7 @@
   {
     "id": "research-navy-v1",
     "name": "就活研究所｜ネイビーレポート",
-    "description": "参考画像の白い余白、濃紺の文字、水色から濃紺の帯を写真なしで再構成したテンプレート",
+    "description": "参考画像の写真、白い余白、濃紺の文字、水色から濃紺の帯を5ページの調査レポートへ再構成したテンプレート",
     "canvas": { "width": 1080, "height": 1350 },
     "colors": {
       "background": "#F7F7F5",
@@ -20,20 +20,45 @@
       "headlineWeight": 500,
       "bodyWeight": 400
     },
-    "cover": {
-      "brand": { "x": 540, "y": 92, "fontSize": 44, "anchor": "middle" },
-      "hero": { "x": 54, "y": 158, "width": 972, "height": 886, "radius": 0 },
-      "topic": { "x": 76, "y": 455, "fontSize": 88, "lineHeight": 108, "maxUnits": 10, "maxLines": 3 },
-      "hook": { "x": 76, "y": 790, "fontSize": 48, "lineHeight": 68, "maxUnits": 19, "maxLines": 3 },
-      "footer": { "y": 1216, "height": 134 }
+    "photoPolicy": {
+      "provider": "Pexels",
+      "orientation": "landscape",
+      "content": "industry and realistic working professional",
+      "forbidden": ["company logos", "trademarks", "illustrations", "staged handshakes"],
+      "creditRequired": true
     },
-    "body": {
-      "brand": { "x": 540, "y": 82, "fontSize": 34, "anchor": "middle" },
-      "label": { "x": 64, "y": 180, "fontSize": 27 },
-      "title": { "x": 64, "y": 330, "fontSize": 68, "lineHeight": 88, "maxUnits": 14, "maxLines": 3 },
-      "bodyPanel": { "x": 54, "y": 610, "width": 972, "height": 480, "radius": 28 },
-      "bodyText": { "x": 98, "y": 705, "fontSize": 38, "lineHeight": 64, "maxUnits": 22, "maxLines": 6 },
-      "footer": { "y": 1216, "height": 134 }
+    "logoPolicy": {
+      "source": "official company domain",
+      "companyNamesAsText": false,
+      "placements": ["quantitative metric labels", "company comparison headers"],
+      "failureFallback": "generic company icon"
+    },
+    "pages": {
+      "cover": {
+        "brandArea": { "y": 0, "height": 142 },
+        "photoArea": { "y": 142, "height": 690 },
+        "titleArea": { "y": 832, "height": 384 },
+        "reportBar": { "y": 1216, "height": 134 }
+      },
+      "quantitative": {
+        "chartArea": { "x": 54, "y": 275, "width": 972, "height": 430 },
+        "summaryArea": { "x": 54, "y": 748, "width": 972, "height": 450 }
+      },
+      "qualitative": {
+        "positiveArea": { "x": 54, "y": 220, "width": 466, "height": 470 },
+        "negativeArea": { "x": 560, "y": 220, "width": 466, "height": 470 },
+        "outlookArea": { "x": 54, "y": 728, "width": 972, "height": 470 }
+      },
+      "comparison": {
+        "tableArea": { "x": 54, "y": 278, "width": 972, "height": 870 },
+        "columns": 3,
+        "rows": 4
+      },
+      "cta": {
+        "bookmarkArea": { "centerX": 540, "y": 220 },
+        "copyArea": { "centerX": 540, "y": 650 },
+        "reportBar": { "x": 186, "y": 1088, "width": 708, "height": 92 }
+      }
     }
   }
 ]
