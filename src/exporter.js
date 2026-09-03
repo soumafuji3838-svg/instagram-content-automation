@@ -1,7 +1,6 @@
-const fs = require("node:fs");
-const path = require("node:path");
 const archiver = require("archiver");
 const { captionFor } = require("./instagram");
+const { readAssetBuffer } = require("./blob-storage");
 
 function postInfo(post) {
   return [
@@ -42,6 +41,7 @@ function photoCreditText(post) {
 
 async function streamPostExport(post, res) {
   const safeId = String(post.id).replace(/[^a-zA-Z0-9_-]/g, "-");
+  const imageBuffers = await Promise.all(post.assets.map((asset) => readAssetBuffer(asset)));
   res.writeHead(200, {
     "Content-Type": "application/zip",
     "Content-Disposition": `attachment; filename="instagram-post-${safeId}.zip"`,
@@ -55,12 +55,8 @@ async function streamPostExport(post, res) {
   archive.on("error", (error) => res.destroy(error));
   archive.pipe(res);
 
-  const outputRoot = path.resolve(process.cwd(), "output");
-  for (const [index, asset] of post.assets.entries()) {
-    const relative = String(asset).replace(/^\/output\//, "");
-    const filePath = path.resolve(outputRoot, relative);
-    if (!filePath.startsWith(`${outputRoot}${path.sep}`)) throw new Error("画像パスが正しくありません。");
-    archive.file(filePath, { name: `images/slide-${String(index + 1).padStart(2, "0")}.png` });
+  for (const [index, buffer] of imageBuffers.entries()) {
+    archive.append(buffer, { name: `images/slide-${String(index + 1).padStart(2, "0")}.png` });
   }
 
   archive.append(`${captionFor(post)}\n`, { name: "caption.txt" });

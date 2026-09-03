@@ -1,10 +1,16 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { dataRoot } = require("./runtime-paths");
+const { storageMode, readPostsBlob, writePostsBlob } = require("./blob-storage");
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = dataRoot();
 const postsFile = path.join(dataDir, "posts.json");
 
 async function ensureStore() {
+  if (storageMode() === "blob") {
+    await readPostsBlob();
+    return;
+  }
   await fs.mkdir(dataDir, { recursive: true });
   try {
     await fs.access(postsFile);
@@ -14,11 +20,13 @@ async function ensureStore() {
 }
 
 async function listPosts() {
+  if (storageMode() === "blob") return readPostsBlob();
   await ensureStore();
   return JSON.parse(await fs.readFile(postsFile, "utf8"));
 }
 
 async function savePosts(posts) {
+  if (storageMode() === "blob") return writePostsBlob(posts);
   await ensureStore();
   const temporary = `${postsFile}.tmp`;
   await fs.writeFile(temporary, `${JSON.stringify(posts, null, 2)}\n`);

@@ -103,7 +103,7 @@
       state.config = await request("/api/config"); state.posts = await request("/api/posts");
       $("#account").innerHTML = state.config.accounts.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
       $("#contentType").innerHTML = state.config.contentTypes.map((type) => `<option value="${type.id}">${escapeHtml(type.label)}</option>`).join("");
-      $("#mode").textContent = `${state.config.openAIConfigured ? "OpenAI接続済み" : "デモ生成"}・${state.config.pexelsConfigured ? "表紙写真接続済み" : "表紙は仮画像"}・${state.config.dryRun ? "投稿ドライラン" : "実投稿モード"}`; render();
+      $("#mode").textContent = `${state.config.openAIConfigured ? "OpenAI接続済み" : "デモ生成"}・${state.config.pexelsConfigured ? "表紙写真接続済み" : "表紙は仮画像"}・${state.config.storageMode === "blob" ? "Vercel Blob保存" : "ローカル保存"}・${state.config.dryRun ? "投稿ドライラン" : "実投稿モード"}`; render();
     }
     $("#form").addEventListener("submit", async (event) => {
       event.preventDefault(); const form = event.currentTarget; const button = event.submitter; const data = Object.fromEntries(new FormData(form));
@@ -125,7 +125,7 @@
       }
       alert("キャプションをコピーしました。");
     }
-    async function deletePost(id) { if (!confirm("この投稿を一覧から削除しますか？画像は復旧用フォルダへ移動します。")) return; setPending(id, true); try { await request(`/api/posts/${id}`, { method: "DELETE" }); state.posts = state.posts.filter((post) => post.id !== id); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
+    async function deletePost(id) { if (!confirm("この投稿と生成画像を削除しますか？")) return; setPending(id, true); try { await request(`/api/posts/${id}`, { method: "DELETE" }); state.posts = state.posts.filter((post) => post.id !== id); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
     function openEditor(id) {
       const post = state.posts.find((item) => item.id === id); if (!post) return;
       const c = post.content; $("#editId").value = post.id; $("#editInternalTitle").value = c.title; $("#editSubtitle").value = c.subtitle; $("#editImageQuery").value = c.imageQuery; $("#editSubjectName").value = c.subject.name; $("#editSubjectType").value = c.subject.entityType; $("#editSubjectDomain").value = c.subject.domain || ""; $("#editCaption").value = c.caption; $("#editHashtags").value = c.hashtags.join(" ");
