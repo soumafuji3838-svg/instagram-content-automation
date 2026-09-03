@@ -49,4 +49,17 @@ async function fetchCoverPhoto(query) {
   }
 }
 
-module.exports = { fetchCoverPhoto, selectPhoto };
+async function restoreCoverPhoto(metadata) {
+  if (!metadata?.imageUrl) return null;
+  try {
+    const response = await fetch(metadata.imageUrl, { signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`写真再取得 ${response.status}`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length || buffer.length > 20_000_000) throw new Error("写真データのサイズが不正です。");
+    return { buffer, metadata };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { fetchCoverPhoto, restoreCoverPhoto, selectPhoto };

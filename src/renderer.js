@@ -1,12 +1,13 @@
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const path = require("node:path");
+const { dataRoot, postOutputDirectory } = require("./runtime-paths");
 const { getDesign } = require("./designs");
 const { getContentType } = require("./content-types");
 const { normalizeDomain, prepareCompanyLogos } = require("./logo");
 
 const fontDirectory = path.join(process.cwd(), "node_modules", "noto-fontface-cjk-jp", "fonts", "Noto");
-const fontConfigDirectory = path.join(process.cwd(), "data");
+const fontConfigDirectory = dataRoot();
 const fontConfigPath = path.join(fontConfigDirectory, "fonts.conf");
 fsSync.mkdirSync(fontConfigDirectory, { recursive: true });
 fsSync.writeFileSync(fontConfigPath, `<?xml version="1.0"?>
@@ -280,7 +281,7 @@ async function existingPhoto(directory) {
 }
 
 async function renderCarousel({ id, topic, contentType, content, account, coverPhoto = null }) {
-  const directory = path.join(process.cwd(), "output", id);
+  const directory = postOutputDirectory(id);
   await fs.mkdir(directory, { recursive: true });
   const design = getDesign(account.designId);
   const photoBuffer = coverPhoto?.buffer || await existingPhoto(directory);

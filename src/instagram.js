@@ -35,7 +35,7 @@ function captionFor(post) {
 
 function publicAssetUrls(post) {
   const base = String(process.env.PUBLIC_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-  return post.assets.map((asset) => `${base}${asset}`);
+  return post.assets.map((asset) => /^https:\/\//i.test(String(asset)) ? String(asset) : `${base}${asset}`);
 }
 
 async function graphPost(path, parameters, fetchImpl = fetch) {

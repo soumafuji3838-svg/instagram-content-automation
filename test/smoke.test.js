@@ -7,7 +7,10 @@ const { getDesign } = require("../src/designs");
 const { extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
 const { normalizeDomain, iconLinks, logoDomains } = require("../src/logo");
-const { graphUrl, graphPost, verifyInstagramConnection } = require("../src/instagram");
+const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
+const { authorizeRequest } = require("../src/app");
+const { POSTS_BLOB_PATH, setBlobClientForTests, readPostsBlob, writePostsBlob, isBlobUrl } = require("../src/blob-storage");
+const vercelConfig = require("../vercel.json");
 const accounts = require("../config/accounts.json");
 
 test("Japanese wrapping preserves the text", () => {
@@ -236,4 +239,83 @@ test("Instagram connection check validates the token account against INSTAGRAM_U
     if (previousUserId === undefined) delete process.env.INSTAGRAM_USER_ID;
     else process.env.INSTAGRAM_USER_ID = previousUserId;
   }
+});
+
+test("public Instagram payload keeps Vercel Blob URLs unchanged", () => {
+  const previousBase = process.env.PUBLIC_BASE_URL;
+  process.env.PUBLIC_BASE_URL = "https://studio.example.com";
+  try {
+    assert.deepEqual(publicAssetUrls({ assets: [
+      "https://store.public.blob.vercel-storage.com/slide.png",
+      "/output/example/slide.png"
+    ] }), [
+      "https://store.public.blob.vercel-storage.com/slide.png",
+      "https://studio.example.com/output/example/slide.png"
+    ]);
+    assert.equal(isBlobUrl("https://store.public.blob.vercel-storage.com/slide.png"), true);
+  } finally {
+    if (previousBase === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = previousBase;
+  }
+});
+
+test("Blob post state is private and can be read after overwrite", async () => {
+  const previousMode = process.env.STORAGE_MODE;
+  const previousToken = process.env.BLOB_READ_WRITE_TOKEN;
+  process.env.STORAGE_MODE = "blob";
+  process.env.BLOB_READ_WRITE_TOKEN = "test-blob-token";
+  let stored = null;
+  setBlobClientForTests({
+    async put(pathname, body, options) {
+      assert.equal(pathname, POSTS_BLOB_PATH);
+      assert.equal(options.access, "private");
+      assert.equal(options.allowOverwrite, true);
+      stored = String(body);
+      return { url: "https://store.private.blob.vercel-storage.com/private/posts.json" };
+    },
+    async get(pathname, options) {
+      assert.equal(pathname, POSTS_BLOB_PATH);
+      assert.equal(options.access, "private");
+      return stored ? { statusCode: 200, stream: new Blob([stored]).stream() } : null;
+    }
+  });
+  try {
+    assert.deepEqual(await readPostsBlob(), []);
+    await writePostsBlob([{ id: "post-1" }]);
+    assert.deepEqual(await readPostsBlob(), [{ id: "post-1" }]);
+  } finally {
+    setBlobClientForTests(null);
+    if (previousMode === undefined) delete process.env.STORAGE_MODE;
+    else process.env.STORAGE_MODE = previousMode;
+    if (previousToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = previousToken;
+  }
+});
+
+test("Vercel requires admin credentials and accepts valid Basic authentication", () => {
+  const previousVercel = process.env.VERCEL;
+  const previousPassword = process.env.ADMIN_PASSWORD;
+  const previousUsername = process.env.ADMIN_USERNAME;
+  process.env.VERCEL = "1";
+  process.env.ADMIN_USERNAME = "admin";
+  process.env.ADMIN_PASSWORD = "test-password";
+  try {
+    const unauthorized = { status: null, body: "", writeHead(status) { this.status = status; }, end(body) { this.body = body; } };
+    assert.equal(authorizeRequest({ headers: {} }, unauthorized), false);
+    assert.equal(unauthorized.status, 401);
+    const authorization = `Basic ${Buffer.from("admin:test-password").toString("base64")}`;
+    assert.equal(authorizeRequest({ headers: { authorization } }, {}), true);
+  } finally {
+    if (previousVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = previousVercel;
+    if (previousPassword === undefined) delete process.env.ADMIN_PASSWORD;
+    else process.env.ADMIN_PASSWORD = previousPassword;
+    if (previousUsername === undefined) delete process.env.ADMIN_USERNAME;
+    else process.env.ADMIN_USERNAME = previousUsername;
+  }
+});
+
+test("Vercel routes all requests through the protected Node function", () => {
+  assert.equal(vercelConfig.functions["api/index.js"].maxDuration, 300);
+  assert.deepEqual(vercelConfig.routes, [{ src: "/(.*)", dest: "/api/index.js" }]);
 });

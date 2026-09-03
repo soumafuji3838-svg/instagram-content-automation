@@ -1,4 +1,4 @@
-# Instagram Content Quality MVP v0.8
+# Instagram Content Quality MVP v0.9
 
 テーマを入力すると、最新情報を調査した日本語のInstagramカルーセル原稿と5枚のPNG画像を生成し、承認後にInstagram Graph APIへ投稿するMVPです。
 
@@ -12,6 +12,8 @@
 - 原稿編集後の画像再生成
 - AI再生成、承認取り消し、投稿削除
 - Instagramログイン方式（`graph.instagram.com`）によるカルーセル投稿
+- Vercel Functionsでの実行とVercel Blobへの投稿・画像保存
+- Vercel公開時のHTTP Basic認証による管理画面保護
 - 安全なドライランモード
 - JSONファイルによる簡易投稿管理
 - OpenAI拒否・不正なスライド数・不正なハッシュタグの検証
@@ -98,6 +100,32 @@ npm run verify:instagram
 ```
 
 `Instagram接続成功: @...` と表示されたら接続情報は一致しています。この確認中も `INSTAGRAM_DRY_RUN=true` のままで構いません。
+
+## Vercelへデプロイ
+
+GitHubリポジトリをVercelへImportし、プロジェクトにVercel Blobを接続します。Vercelでは以下の環境変数を設定してください。
+
+```env
+STORAGE_MODE=blob
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=十分に長い専用パスワード
+OPENAI_API_KEY=...
+PEXELS_API_KEY=...
+INSTAGRAM_DRY_RUN=true
+INSTAGRAM_USER_ID=...
+INSTAGRAM_ACCESS_TOKEN=...
+META_GRAPH_API_VERSION=v26.0
+```
+
+Blob接続時に`BLOB_READ_WRITE_TOKEN`が自動設定されていることを確認してください。管理画面とAPIはBasic認証で保護されます。Instagramへ渡す5枚の画像だけは、Metaが取得できるVercel Blobの公開URLとして保存されます。投稿JSONはBlobの非公開領域に保存されます。
+
+初回デプロイ後、発行されたURLを次の環境変数へ登録して再デプロイします。
+
+```env
+PUBLIC_BASE_URL=https://your-project.vercel.app
+```
+
+公開環境でドライランが完了するまで、`INSTAGRAM_DRY_RUN=false`に変更しないでください。
 
 ## アカウント設定
 
