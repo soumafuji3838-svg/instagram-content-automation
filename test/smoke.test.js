@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const path = require("node:path");
 const { wrapJapanese, escapeXml, quantitativeSvg, comparisonSvg } = require("../src/renderer");
 const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
 const { contentTypes } = require("../src/content-types");
@@ -9,7 +11,17 @@ const { selectPhoto } = require("../src/photo");
 const { normalizeDomain, iconLinks, logoDomains } = require("../src/logo");
 const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
 const { authorizeRequest } = require("../src/app");
-const { POSTS_BLOB_PATH, setBlobClientForTests, readPostsBlob, writePostsBlob, isBlobUrl } = require("../src/blob-storage");
+const {
+  POSTS_BLOB_PATH,
+  setBlobClientForTests,
+  publicBlobCredentials,
+  privateBlobCredentials,
+  readPostsBlob,
+  writePostsBlob,
+  persistRenderedAssets,
+  isBlobUrl
+} = require("../src/blob-storage");
+const { outputRoot } = require("../src/runtime-paths");
 const vercelConfig = require("../vercel.json");
 const accounts = require("../config/accounts.json");
 
@@ -259,23 +271,74 @@ test("public Instagram payload keeps Vercel Blob URLs unchanged", () => {
   }
 });
 
-test("Blob post state is private and can be read after overwrite", async () => {
+test("public and private Blob stores use separate credentials", () => {
+  const previousPublicToken = process.env.BLOB_READ_WRITE_TOKEN;
+  const previousPrivateToken = process.env.POSTS_BLOB_READ_WRITE_TOKEN;
+  process.env.BLOB_READ_WRITE_TOKEN = "public-images-token";
+  process.env.POSTS_BLOB_READ_WRITE_TOKEN = "private-posts-token";
+  try {
+    assert.deepEqual(publicBlobCredentials(), { token: "public-images-token" });
+    assert.deepEqual(privateBlobCredentials(), { token: "private-posts-token" });
+  } finally {
+    if (previousPublicToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = previousPublicToken;
+    if (previousPrivateToken === undefined) delete process.env.POSTS_BLOB_READ_WRITE_TOKEN;
+    else process.env.POSTS_BLOB_READ_WRITE_TOKEN = previousPrivateToken;
+  }
+});
+
+test("rendered slides are uploaded only with public-store credentials", async () => {
   const previousMode = process.env.STORAGE_MODE;
   const previousToken = process.env.BLOB_READ_WRITE_TOKEN;
   process.env.STORAGE_MODE = "blob";
-  process.env.BLOB_READ_WRITE_TOKEN = "test-blob-token";
+  process.env.BLOB_READ_WRITE_TOKEN = "public-images-token";
+  const directory = `blob-test-${Date.now()}`;
+  const asset = `/output/${directory}/slide.png`;
+  const filePath = path.join(outputRoot(), directory, "slide.png");
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, "test-image");
+  setBlobClientForTests({
+    async put(pathname, body, options) {
+      assert.match(pathname, /^public\/posts\/post-1\/slide-01\.png$/);
+      assert.equal(Buffer.from(body).toString(), "test-image");
+      assert.equal(options.access, "public");
+      assert.equal(options.token, "public-images-token");
+      return { url: "https://store.public.blob.vercel-storage.com/slide.png" };
+    }
+  });
+  try {
+    assert.deepEqual(await persistRenderedAssets("post-1", [asset]), [
+      "https://store.public.blob.vercel-storage.com/slide.png"
+    ]);
+  } finally {
+    setBlobClientForTests(null);
+    await fs.rm(path.join(outputRoot(), directory), { recursive: true, force: true });
+    if (previousMode === undefined) delete process.env.STORAGE_MODE;
+    else process.env.STORAGE_MODE = previousMode;
+    if (previousToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = previousToken;
+  }
+});
+
+test("Blob post state uses the private store and can be read after overwrite", async () => {
+  const previousMode = process.env.STORAGE_MODE;
+  const previousToken = process.env.POSTS_BLOB_READ_WRITE_TOKEN;
+  process.env.STORAGE_MODE = "blob";
+  process.env.POSTS_BLOB_READ_WRITE_TOKEN = "private-posts-token";
   let stored = null;
   setBlobClientForTests({
     async put(pathname, body, options) {
       assert.equal(pathname, POSTS_BLOB_PATH);
       assert.equal(options.access, "private");
       assert.equal(options.allowOverwrite, true);
+      assert.equal(options.token, "private-posts-token");
       stored = String(body);
       return { url: "https://store.private.blob.vercel-storage.com/private/posts.json" };
     },
     async get(pathname, options) {
       assert.equal(pathname, POSTS_BLOB_PATH);
       assert.equal(options.access, "private");
+      assert.equal(options.token, "private-posts-token");
       return stored ? { statusCode: 200, stream: new Blob([stored]).stream() } : null;
     }
   });
@@ -287,8 +350,8 @@ test("Blob post state is private and can be read after overwrite", async () => {
     setBlobClientForTests(null);
     if (previousMode === undefined) delete process.env.STORAGE_MODE;
     else process.env.STORAGE_MODE = previousMode;
-    if (previousToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
-    else process.env.BLOB_READ_WRITE_TOKEN = previousToken;
+    if (previousToken === undefined) delete process.env.POSTS_BLOB_READ_WRITE_TOKEN;
+    else process.env.POSTS_BLOB_READ_WRITE_TOKEN = previousToken;
   }
 });
 
