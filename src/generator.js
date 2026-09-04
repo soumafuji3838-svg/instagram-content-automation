@@ -217,7 +217,8 @@ function buildRepairRequest({ content, sources, topic, contentType, targetYear, 
     instructions: [
       "You are a meticulous Japanese editor repairing an Instagram carousel that failed a publication gate.",
       "Return the complete corrected content object only. Do not perform new research.",
-      "Preserve every factual claim, number, company, sourceIds value, and comparison value unless removing an unsupported or duplicated claim.",
+      "Preserve every supported factual claim, number, company, and sourceIds value unless removing an unsupported or duplicated claim.",
+      "The comparison row labels are fixed. Rewrite each comparison value so it directly answers its row label using only already supplied cited facts. You may move an existing cited fact to the matching row or replace a mismatched value with 確認できず. Never substitute an unrelated fact.",
       "Never invent or estimate a fact, number, date, news item, causal relationship, company policy, source id, or URL.",
       "Keep facts separate from job-seeker interpretation. Phrase interpretation cautiously and turn it into a concrete recruiting-material or interview question.",
       "Meet every Japanese character limit exactly. Count each Unicode character, including punctuation, as one character.",
@@ -226,7 +227,15 @@ function buildRepairRequest({ content, sources, topic, contentType, targetYear, 
       "Keep exactly three quantitative metrics, three comparison columns, four comparison rows, and the existing five-page structure.",
       "Keep the supplied CTA and base brand hashtags."
     ].join("\n"),
-    input: JSON.stringify({ topic, contentType: getContentType(contentType).label, targetYear, failedChecks: feedback, content, sources }),
+    input: JSON.stringify({
+      topic,
+      contentType: getContentType(contentType).label,
+      targetYear,
+      fixedComparisonRows: comparisonRowsFor(contentType),
+      failedChecks: feedback,
+      content,
+      sources
+    }),
     text: { format: { type: "json_schema", name: "repaired_instagram_carousel", strict: true, schema: contentSchema } }
   };
 }
@@ -336,6 +345,7 @@ function buildOpenAIRequest(input, referenceDate = new Date()) {
       "Write qualitative positive/negative titles in at most 10 Japanese characters, each explanation in 45-60 Japanese characters, and outlookText in 80-100 Japanese characters.",
       "Write qualitative.studentInsight in 45-70 Japanese characters and connect the outlook to a concrete career-research question.",
       "Search the web for three commonly compared industries or companies. Use the four comparison row labels exactly as supplied and keep each table cell concise.",
+      "Every comparison cell must directly answer its fixed row label. Never place profit figures under 市場成長性 or business segments under 主要企業. If the searched sources do not support a cell, write 確認できず instead of substituting a different fact.",
       "For each comparison column, set entityType to company or industry. For a company, provide its official website hostname in domain; for an industry, use an empty domain.",
       "If average salary or offer倍率 is not supported by a trustworthy source, write 非開示. Never estimate or infer it.",
       "Write imageQuery in English for a realistic working professional in the relevant industry. Avoid logos, uniforms with trademarks, illustrations, and staged handshakes.",

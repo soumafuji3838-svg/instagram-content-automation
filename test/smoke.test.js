@@ -8,7 +8,7 @@ const { contentTypes } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
 const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
-const { normalizeDomain, iconLinks, logoLinks, logoDomains } = require("../src/logo");
+const { normalizeDomain, iconLinks, logoLinks, prioritizedLogoCandidates, logoDomains } = require("../src/logo");
 const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
 const { authorizeRequest } = require("../src/app");
 const {
@@ -125,6 +125,14 @@ test("official logo discovery includes metadata and structured data", () => {
   ]);
 });
 
+test("logo discovery always retains the final domain favicon fallback", () => {
+  const primary = Array.from({ length: 12 }, (_, index) => `https://example.co.jp/icon-${index}.png`);
+  const fallback = "https://www.google.com/s2/favicons?domain=example.co.jp&sz=256";
+  const candidates = prioritizedLogoCandidates(primary, fallback);
+  assert.equal(candidates.length, 8);
+  assert.equal(candidates.at(-1), fallback);
+});
+
 test("company labels render as logos or generic icons instead of names", () => {
   const content = validateContent(demoContent({ topic: "企業研究", targetYear: "28卒", account: accounts[0], contentType: "company_report" }), "company_report");
   const design = getDesign(accounts[0].designId);
@@ -179,7 +187,9 @@ test("repair request rewrites only supplied content without web search", () => {
   assert.equal(request.tools, undefined);
   assert.equal(request.text.format.strict, true);
   assert.match(request.instructions, /Never invent or estimate/);
+  assert.match(request.instructions, /replace a mismatched value with 確認できず/);
   assert.deepEqual(JSON.parse(request.input).failedChecks, ["短い"]);
+  assert.deepEqual(JSON.parse(request.input).fixedComparisonRows, ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
 });
 
 test("repair feedback excludes freshness and URL failures that rewriting cannot fix", () => {

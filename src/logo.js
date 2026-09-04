@@ -23,7 +23,10 @@ async function fetchBuffer(url, { timeout = 10000, maxBytes = 4_000_000 } = {}) 
   const response = await fetch(url, {
     redirect: "follow",
     signal: AbortSignal.timeout(timeout),
-    headers: { "User-Agent": "Mozilla/5.0 Instagram Career Research Studio/0.9.2" }
+    headers: {
+      "User-Agent": "Mozilla/5.0 Instagram Career Research Studio/0.9.3",
+      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    }
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const declared = Number(response.headers.get("content-length") || 0);
@@ -69,6 +72,13 @@ async function normalizeLogo(buffer) {
     .toBuffer();
 }
 
+function prioritizedLogoCandidates(candidates, fallbackUrl, limit = 8) {
+  const primary = [...new Set(candidates)]
+    .filter((url) => url !== fallbackUrl)
+    .slice(0, Math.max(0, limit - 1));
+  return [...primary, fallbackUrl];
+}
+
 async function fetchOfficialLogo(domain) {
   const normalized = normalizeDomain(domain);
   if (!normalized) return { buffer: null, metadata: { domain: "", status: "not_applicable" } };
@@ -78,16 +88,18 @@ async function fetchOfficialLogo(domain) {
     const page = await fetchBuffer(homepage, { timeout: 12000, maxBytes: 2_000_000 });
     candidates = [...logoLinks(page.buffer.toString("utf8"), page.finalUrl), ...candidates];
   } catch { /* favicon and domain-based fallback may still work */ }
-  candidates.push(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(normalized)}&sz=256`);
+  const fallbackUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(normalized)}&sz=256`;
+  const attemptedUrls = [];
 
-  for (const url of [...new Set(candidates)].slice(0, 8)) {
+  for (const url of prioritizedLogoCandidates(candidates, fallbackUrl)) {
+    attemptedUrls.push(url);
     try {
       const image = await fetchBuffer(url);
       const buffer = await normalizeLogo(image.buffer);
-      return { buffer, metadata: { domain: normalized, status: "ready", sourceUrl: image.finalUrl } };
+      return { buffer, metadata: { domain: normalized, status: "ready", sourceUrl: image.finalUrl, attempted: attemptedUrls.length } };
     } catch { /* try the next official icon candidate */ }
   }
-  return { buffer: null, metadata: { domain: normalized, status: "failed" } };
+  return { buffer: null, metadata: { domain: normalized, status: "failed", attempted: attemptedUrls.length } };
 }
 
 function logoDomains(content) {
@@ -115,4 +127,4 @@ async function prepareCompanyLogos(content, directory) {
   return logos;
 }
 
-module.exports = { normalizeDomain, iconLinks, logoLinks, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
+module.exports = { normalizeDomain, iconLinks, logoLinks, prioritizedLogoCandidates, fetchOfficialLogo, logoDomains, prepareCompanyLogos };

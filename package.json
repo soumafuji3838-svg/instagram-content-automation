@@ -1,6 +1,6 @@
 {
   "name": "instagram-carousel-mvp",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "private": true,
   "description": "Instagram carousel generation, approval, and publishing MVP",
   "main": "src/app.js",
