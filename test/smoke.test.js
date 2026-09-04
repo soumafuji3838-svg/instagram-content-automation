@@ -8,7 +8,7 @@ const { contentTypes } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
 const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
-const { normalizeDomain, iconLinks, logoLinks, prioritizedLogoCandidates, logoDomains } = require("../src/logo");
+const { normalizeDomain, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, logoDomains } = require("../src/logo");
 const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
 const { authorizeRequest } = require("../src/app");
 const {
@@ -127,10 +127,12 @@ test("official logo discovery includes metadata and structured data", () => {
 
 test("logo discovery always retains the final domain favicon fallback", () => {
   const primary = Array.from({ length: 12 }, (_, index) => `https://example.co.jp/icon-${index}.png`);
-  const fallback = "https://www.google.com/s2/favicons?domain=example.co.jp&sz=256";
-  const candidates = prioritizedLogoCandidates(primary, fallback);
-  assert.equal(candidates.length, 8);
-  assert.equal(candidates.at(-1), fallback);
+  const fallbacks = logoFallbackUrls("example.co.jp");
+  const candidates = prioritizedLogoCandidates(primary, fallbacks);
+  assert.equal(candidates.length, 12);
+  assert.deepEqual(candidates.slice(-fallbacks.length), fallbacks);
+  assert.ok(fallbacks.some((url) => url.includes("domain_url=")));
+  assert.ok(fallbacks.some((url) => url.includes("t2.gstatic.com")));
 });
 
 test("company labels render as logos or generic icons instead of names", () => {
@@ -204,11 +206,22 @@ test("repair feedback excludes freshness and URL failures that rewriting cannot 
   assert.ok(!feedback.includes("参照が存在するか: 参照元を追加"));
 });
 
-test("repair feedback targets four-point editorial checks when total is below 85", () => {
+test("repair feedback prioritizes failed editorial checks before four-point polishing", () => {
   const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
   const quality = {
     overallScore: 80,
-    checks: QUALITY_CRITERIA.map((criterion) => ({ criterion, score: 4, suggestion: `${criterion}を磨く` }))
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 4 ? 3 : 4, suggestion: `${criterion}を磨く` }))
+  };
+  const feedback = repairFeedback(content, [], quality);
+  assert.ok(feedback.some((item) => item.includes("見出しだけで意味が伝わるかを磨く")));
+  assert.ok(!feedback.some((item) => item.includes("抽象論になっていないかを磨く")));
+});
+
+test("repair feedback polishes four-point checks only when no editorial check fails", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const quality = {
+    overallScore: 80,
+    checks: QUALITY_CRITERIA.map((criterion) => ({ criterion, score: 4, pass: true, suggestion: `${criterion}を磨く` }))
   };
   const feedback = repairFeedback(content, [], quality);
   assert.ok(feedback.some((item) => item.includes("抽象論になっていないかを磨く")));

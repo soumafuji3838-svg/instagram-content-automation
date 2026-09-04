@@ -72,11 +72,29 @@ async function normalizeLogo(buffer) {
     .toBuffer();
 }
 
-function prioritizedLogoCandidates(candidates, fallbackUrl, limit = 8) {
+function logoFallbackUrls(domain) {
+  const normalized = normalizeDomain(domain);
+  if (!normalized) return [];
+  const homepage = `https://${normalized}/`;
+  return [
+    `https://${normalized}/favicon.ico`,
+    `https://${normalized}/favicon.png`,
+    `https://${normalized}/apple-touch-icon.png`,
+    `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(homepage)}&sz=256`,
+    `https://www.google.com/s2/favicons?domain=${encodeURIComponent(normalized)}&sz=256`,
+    `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent(homepage)}&size=256`,
+    `https://unavatar.io/${normalized}?fallback=false`,
+    `https://icons.duckduckgo.com/ip3/${normalized}.ico`
+  ];
+}
+
+function prioritizedLogoCandidates(candidates, fallbackUrls, limit = 12) {
+  const fallbacks = [...new Set(Array.isArray(fallbackUrls) ? fallbackUrls : [fallbackUrls])].filter(Boolean);
+  const fallbackSet = new Set(fallbacks);
   const primary = [...new Set(candidates)]
-    .filter((url) => url !== fallbackUrl)
-    .slice(0, Math.max(0, limit - 1));
-  return [...primary, fallbackUrl];
+    .filter((url) => !fallbackSet.has(url))
+    .slice(0, Math.max(0, limit - fallbacks.length));
+  return [...primary, ...fallbacks].slice(0, limit);
 }
 
 async function fetchOfficialLogo(domain) {
@@ -88,18 +106,21 @@ async function fetchOfficialLogo(domain) {
     const page = await fetchBuffer(homepage, { timeout: 12000, maxBytes: 2_000_000 });
     candidates = [...logoLinks(page.buffer.toString("utf8"), page.finalUrl), ...candidates];
   } catch { /* favicon and domain-based fallback may still work */ }
-  const fallbackUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(normalized)}&sz=256`;
+  const fallbackUrls = logoFallbackUrls(normalized);
   const attemptedUrls = [];
+  const errors = [];
 
-  for (const url of prioritizedLogoCandidates(candidates, fallbackUrl)) {
+  for (const url of prioritizedLogoCandidates(candidates, fallbackUrls)) {
     attemptedUrls.push(url);
     try {
       const image = await fetchBuffer(url);
       const buffer = await normalizeLogo(image.buffer);
       return { buffer, metadata: { domain: normalized, status: "ready", sourceUrl: image.finalUrl, attempted: attemptedUrls.length } };
-    } catch { /* try the next official icon candidate */ }
+    } catch (error) {
+      errors.push({ url, error: String(error?.message || error).slice(0, 240) });
+    }
   }
-  return { buffer: null, metadata: { domain: normalized, status: "failed", attempted: attemptedUrls.length } };
+  return { buffer: null, metadata: { domain: normalized, status: "failed", attempted: attemptedUrls.length, errors } };
 }
 
 function logoDomains(content) {
@@ -127,4 +148,4 @@ async function prepareCompanyLogos(content, directory) {
   return logos;
 }
 
-module.exports = { normalizeDomain, iconLinks, logoLinks, prioritizedLogoCandidates, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
+module.exports = { normalizeDomain, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
