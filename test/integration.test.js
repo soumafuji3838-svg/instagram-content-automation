@@ -36,6 +36,7 @@ test("create, edit, approve, dry-run, regenerate, and delete", async () => {
     assert.ok(exportedBuffer.includes(Buffer.from("caption.txt")));
     assert.ok(exportedBuffer.includes(Buffer.from("references.txt")));
     assert.ok(exportedBuffer.includes(Buffer.from("quality.json")));
+    assert.ok(exportedBuffer.includes(Buffer.from("content.json")));
     assert.ok(exportedBuffer.includes(Buffer.from("photo.json")));
     assert.ok(exportedBuffer.includes(Buffer.from("photo-credit.txt")));
     assert.ok(exportedBuffer.includes(Buffer.from("logos.json")));

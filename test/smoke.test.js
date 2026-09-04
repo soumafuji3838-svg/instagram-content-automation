@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { wrapJapanese, escapeXml, quantitativeSvg, comparisonSvg } = require("../src/renderer");
-const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, buildRepairRequest, repairFeedback, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
+const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, buildRepairRequest, repairFeedback, qualityRank, isBetterQuality, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
 const { contentTypes } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
 const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
@@ -92,7 +92,8 @@ test("content validation normalizes hashtags without hash marks", () => {
 });
 
 test("comparison rows switch between industry and company formats", () => {
-  assert.deepEqual(comparisonRowsFor("industry_report"), ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
+  assert.deepEqual(comparisonRowsFor("industry_report"), ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
+  assert.deepEqual(comparisonRowsFor("industry_comparison"), ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
   assert.deepEqual(comparisonRowsFor("company_report"), ["平均年収", "内定倍率", "直近3カ月の変化", "カルチャー"]);
 });
 
@@ -199,7 +200,7 @@ test("repair request rewrites only supplied content without web search", () => {
   assert.match(request.instructions, /replace a mismatched value with 確認できず/);
   assert.match(request.instructions, /Never generalize one company's fact/);
   assert.deepEqual(JSON.parse(request.input).failedChecks, ["短い"]);
-  assert.deepEqual(JSON.parse(request.input).fixedComparisonRows, ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
+  assert.deepEqual(JSON.parse(request.input).fixedComparisonRows, ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
 });
 
 test("repair feedback excludes freshness and URL failures that rewriting cannot fix", () => {
@@ -234,6 +235,25 @@ test("repair feedback polishes four-point checks only when no editorial check fa
   const feedback = repairFeedback(content, [], quality);
   assert.ok(feedback.some((item) => item.includes("抽象論になっていないかを磨く")));
   assert.ok(!feedback.some((item) => item.includes("参照が存在するかを磨く")));
+});
+
+test("a repair candidate is retained only when it improves publication readiness", () => {
+  const quality = (overallScore, scores) => ({
+    overallScore,
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: scores[index], pass: scores[index] >= 4 }))
+  });
+  const original = quality(86, [4, 5, 5, 4, 4, 4, 4]);
+  const worseRepair = quality(69, [4, 5, 0, 4, 3, 4, 4]);
+  const betterRepair = quality(91, [4, 5, 5, 5, 4, 4, 5]);
+  assert.deepEqual(qualityRank(original), [1, 0, 4, 86]);
+  assert.equal(isBetterQuality(worseRepair, original), false);
+  assert.equal(isBetterQuality(betterRepair, original), true);
+});
+
+test("research request requires exact URLs returned by web search", () => {
+  const request = buildOpenAIRequest({ topic: "総合商社", contentType: "industry_report", targetYear: "28卒", account: accounts[0], notes: "" });
+  assert.match(request.instructions, /Copy every source URL character-for-character/);
+  assert.deepEqual(JSON.parse(request.input).comparisonRows, ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
 });
 
 test("all requested content types are available", () => {

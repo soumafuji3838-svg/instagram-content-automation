@@ -66,6 +66,7 @@ async function streamPostExport(post, res) {
   archive.append(`${JSON.stringify(post.coverPhoto || null, null, 2)}\n`, { name: "photo.json" });
   archive.append(`${JSON.stringify(post.companyLogos || {}, null, 2)}\n`, { name: "logos.json" });
   archive.append(`${JSON.stringify(post.quality || null, null, 2)}\n`, { name: "quality.json" });
+  archive.append(`${JSON.stringify(post.content || null, null, 2)}\n`, { name: "content.json" });
   archive.append(`${JSON.stringify({
     id: post.id,
     topic: post.topic,

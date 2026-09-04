@@ -10,6 +10,9 @@ function resolveCta(account, contentType) {
 }
 
 function comparisonRowsFor(contentType) {
+  if (contentType === "industry_report") {
+    return ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"];
+  }
   return /company/.test(contentType)
     ? ["平均年収", "内定倍率", "直近3カ月の変化", "カルチャー"]
     : ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"];
@@ -333,6 +336,7 @@ function buildOpenAIRequest(input, referenceDate = new Date()) {
     instructions: [
       "You are a research editor for a Japanese Instagram account supporting university students' job hunting.",
       "You must use web search before writing. Prefer primary sources such as company IR/newsrooms, government publications, and official industry bodies.",
+      "Copy every source URL character-for-character from a URL actually returned by web search. Never translate a language path, change a filename, infer a sibling PDF, or construct a likely URL. If the exact URL was not returned by the search tool, do not list it as a source.",
       `Use sources published from ${cutoff.toISOString().slice(0, 10)} through ${today.toISOString().slice(0, 10)}. If a publication date cannot be confirmed, use an empty publishedAt and do not invent a date.`,
       "Provide at least 3 distinct sources. Every numerical, comparative, trend, or company claim must be traceable to a listed source.",
       "Separate facts from interpretation. Do not invent rankings, salaries, deadlines, market sizes, or corporate claims.",
@@ -523,6 +527,25 @@ async function evaluateContentQuality(input, referenceDate = new Date()) {
   return normalizeQuality(JSON.parse(extractOutputText(response)), input.sources || [], referenceDate);
 }
 
+function qualityRank(quality) {
+  const checks = quality?.checks || [];
+  const failedCount = checks.filter((check) => check.score < 4 || check.pass === false).length;
+  const complete = checks.length === QUALITY_CRITERIA.length;
+  const overall = Number(quality?.overallScore) || 0;
+  const ready = complete && failedCount === 0 && overall >= 85 ? 1 : 0;
+  const minimum = complete ? Math.min(...checks.map((check) => Number(check.score) || 0)) : 0;
+  return [ready, failedCount ? -failedCount : 0, minimum, overall];
+}
+
+function isBetterQuality(candidate, current) {
+  const next = qualityRank(candidate);
+  const previous = qualityRank(current);
+  for (let index = 0; index < next.length; index += 1) {
+    if (next[index] !== previous[index]) return next[index] > previous[index];
+  }
+  return false;
+}
+
 async function generateWithOpenAI(input, referenceDate = new Date()) {
   const response = await callOpenAI(buildOpenAIRequest(input, referenceDate));
   const raw = JSON.parse(extractOutputText(response));
@@ -541,8 +564,12 @@ async function generateWithOpenAI(input, referenceDate = new Date()) {
       targetYear: input.targetYear,
       feedback
     }));
-    content = applyAccountRules(validateContent(JSON.parse(extractOutputText(repairResponse)), input.contentType), input.account, input.contentType);
-    quality = await evaluateContentQuality({ content, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+    const candidateContent = applyAccountRules(validateContent(JSON.parse(extractOutputText(repairResponse)), input.contentType), input.account, input.contentType);
+    const candidateQuality = await evaluateContentQuality({ content: candidateContent, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+    if (isBetterQuality(candidateQuality, quality)) {
+      content = candidateContent;
+      quality = candidateQuality;
+    }
   }
   return { content, sources, quality };
 }
@@ -568,6 +595,8 @@ module.exports = {
   buildQualityRequest,
   buildRepairRequest,
   repairFeedback,
+  qualityRank,
+  isBetterQuality,
   resolveCta,
   applyAccountRules,
   comparisonRowsFor
