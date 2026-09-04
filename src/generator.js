@@ -1,5 +1,5 @@
 const { getContentType } = require("./content-types");
-const { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality } = require("./quality");
+const { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality, structureChecks } = require("./quality");
 
 const FORBIDDEN_BRAND_PATTERN = /就活ねこ|就活ガイド|（デモ）|\(デモ\)/;
 
@@ -198,6 +198,38 @@ const qualitySchema = {
   required: ["checks"],
   additionalProperties: false
 };
+
+function repairFeedback(content, sources, quality) {
+  const editableChecks = (quality?.checks || [])
+    .filter((check) => ![QUALITY_CRITERIA[1], QUALITY_CRITERIA[2]].includes(check.criterion));
+  const targetScore = quality?.overallScore < 85 ? 5 : 4;
+  const editorial = editableChecks
+    .filter((check) => check.score < targetScore)
+    .map((check) => `${check.criterion}: ${check.suggestion || check.reason || "改善してください。"}`);
+  return [...new Set([...structureChecks(content, sources), ...editorial])];
+}
+
+function buildRepairRequest({ content, sources, topic, contentType, targetYear, feedback }) {
+  return {
+    model: process.env.OPENAI_MODEL || "gpt-5.6",
+    reasoning: { effort: process.env.OPENAI_REASONING_EFFORT || "low" },
+    max_output_tokens: 16000,
+    instructions: [
+      "You are a meticulous Japanese editor repairing an Instagram carousel that failed a publication gate.",
+      "Return the complete corrected content object only. Do not perform new research.",
+      "Preserve every factual claim, number, company, sourceIds value, and comparison value unless removing an unsupported or duplicated claim.",
+      "Never invent or estimate a fact, number, date, news item, causal relationship, company policy, source id, or URL.",
+      "Keep facts separate from job-seeker interpretation. Phrase interpretation cautiously and turn it into a concrete recruiting-material or interview question.",
+      "Meet every Japanese character limit exactly. Count each Unicode character, including punctuation, as one character.",
+      "Make headings meaningful by themselves, remove repeated ideas across pages, and avoid exaggerated or unsupported certainty.",
+      "For company logo fields, use only an official hostname supported by the supplied verified sources. Do not invent a domain.",
+      "Keep exactly three quantitative metrics, three comparison columns, four comparison rows, and the existing five-page structure.",
+      "Keep the supplied CTA and base brand hashtags."
+    ].join("\n"),
+    input: JSON.stringify({ topic, contentType: getContentType(contentType).label, targetYear, failedChecks: feedback, content, sources }),
+    text: { format: { type: "json_schema", name: "repaired_instagram_carousel", strict: true, schema: contentSchema } }
+  };
+}
 
 function demoContent({ topic, targetYear, account, contentType }) {
   const audience = targetYear || account.target;
@@ -477,9 +509,24 @@ async function evaluateContentQuality(input, referenceDate = new Date()) {
 async function generateWithOpenAI(input, referenceDate = new Date()) {
   const response = await callOpenAI(buildOpenAIRequest(input, referenceDate));
   const raw = JSON.parse(extractOutputText(response));
-  const content = applyAccountRules(validateContent(raw.content, input.contentType), input.account, input.contentType);
   const sources = normalizeSources(raw.sources, extractWebEvidence(response));
-  const quality = await evaluateContentQuality({ content, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+  let content = applyAccountRules(validateContent(raw.content, input.contentType), input.account, input.contentType);
+  let quality = await evaluateContentQuality({ content, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+  const maxRepairAttempts = Math.min(2, positiveInteger(process.env.OPENAI_MAX_REPAIR_ATTEMPTS, 1));
+  for (let attempt = 0; attempt < maxRepairAttempts; attempt += 1) {
+    const feedback = repairFeedback(content, sources, quality);
+    if (!feedback.length) break;
+    const repairResponse = await callOpenAI(buildRepairRequest({
+      content,
+      sources,
+      topic: input.topic,
+      contentType: input.contentType,
+      targetYear: input.targetYear,
+      feedback
+    }));
+    content = applyAccountRules(validateContent(JSON.parse(extractOutputText(repairResponse)), input.contentType), input.account, input.contentType);
+    quality = await evaluateContentQuality({ content, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+  }
   return { content, sources, quality };
 }
 
@@ -502,6 +549,8 @@ module.exports = {
   extractOutputText,
   buildOpenAIRequest,
   buildQualityRequest,
+  buildRepairRequest,
+  repairFeedback,
   resolveCta,
   applyAccountRules,
   comparisonRowsFor

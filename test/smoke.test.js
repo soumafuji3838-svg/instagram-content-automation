@@ -3,12 +3,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { wrapJapanese, escapeXml, quantitativeSvg, comparisonSvg } = require("../src/renderer");
-const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
+const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, buildRepairRequest, repairFeedback, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
 const { contentTypes } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
-const { extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
+const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
-const { normalizeDomain, iconLinks, logoDomains } = require("../src/logo");
+const { normalizeDomain, iconLinks, logoLinks, logoDomains } = require("../src/logo");
 const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
 const { authorizeRequest } = require("../src/app");
 const {
@@ -112,6 +112,19 @@ test("official company domains are normalized and collected for logos", () => {
   assert.deepEqual(iconLinks('<link rel="icon" href="/favicon.png">', "https://example.co.jp/about"), ["https://example.co.jp/favicon.png"]);
 });
 
+test("official logo discovery includes metadata and structured data", () => {
+  const html = [
+    '<link rel="icon" href="/favicon.png">',
+    '<meta property="og:logo" content="/brand/logo.svg">',
+    '<script type="application/ld+json">{"logo":"https:\\/\\/cdn.example.co.jp\\/logo.png"}</script>'
+  ].join("");
+  assert.deepEqual(logoLinks(html, "https://example.co.jp/about"), [
+    "https://example.co.jp/favicon.png",
+    "https://example.co.jp/brand/logo.svg",
+    "https://cdn.example.co.jp/logo.png"
+  ]);
+});
+
 test("company labels render as logos or generic icons instead of names", () => {
   const content = validateContent(demoContent({ topic: "企業研究", targetYear: "28卒", account: accounts[0], contentType: "company_report" }), "company_report");
   const design = getDesign(accounts[0].designId);
@@ -160,6 +173,38 @@ test("OpenAI request reserves output space and uses low reasoning", () => {
   }
 });
 
+test("repair request rewrites only supplied content without web search", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const request = buildRepairRequest({ content, sources: [], topic: "総合商社", contentType: "industry_report", targetYear: "28卒", feedback: ["短い"] });
+  assert.equal(request.tools, undefined);
+  assert.equal(request.text.format.strict, true);
+  assert.match(request.instructions, /Never invent or estimate/);
+  assert.deepEqual(JSON.parse(request.input).failedChecks, ["短い"]);
+});
+
+test("repair feedback excludes freshness and URL failures that rewriting cannot fix", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const quality = { checks: QUALITY_CRITERIA.map((criterion) => ({
+    criterion,
+    score: criterion === QUALITY_CRITERIA[2] || criterion === QUALITY_CRITERIA[3] ? 2 : 5,
+    suggestion: criterion === QUALITY_CRITERIA[2] ? "参照元を追加" : "重複を削除"
+  })) };
+  const feedback = repairFeedback(content, [], quality);
+  assert.ok(feedback.some((item) => item.includes("重複を削除")));
+  assert.ok(!feedback.includes("参照が存在するか: 参照元を追加"));
+});
+
+test("repair feedback targets four-point editorial checks when total is below 85", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const quality = {
+    overallScore: 80,
+    checks: QUALITY_CRITERIA.map((criterion) => ({ criterion, score: 4, suggestion: `${criterion}を磨く` }))
+  };
+  const feedback = repairFeedback(content, [], quality);
+  assert.ok(feedback.some((item) => item.includes("抽象論になっていないかを磨く")));
+  assert.ok(!feedback.some((item) => item.includes("参照が存在するかを磨く")));
+});
+
 test("all requested content types are available", () => {
   assert.deepEqual(contentTypes.map((type) => type.id), ["industry_report", "company_report", "industry_comparison", "company_comparison", "trend_report"]);
 });
@@ -177,6 +222,14 @@ test("web evidence verifies recent source URLs", () => {
   const checks = sourceChecks(sources.concat({ ...sources[0], url: "https://example.com/report-2" }), new Date("2026-08-30T00:00:00Z"));
   assert.equal(checks.freshness.pass, true);
   assert.equal(checks.references.pass, true);
+});
+
+test("web evidence matching ignores tracking parameters and www", () => {
+  assert.equal(evidenceKey("https://www.example.com/report/?utm_source=x"), "example.com/report");
+  const sources = normalizeSources([
+    { id: "S1", title: "Report", url: "https://example.com/report?ref=feed", publishedAt: "2026-08-01" }
+  ], { citations: [], consultedUrls: ["https://www.example.com/report/?utm_source=search"] });
+  assert.equal(sources[0].verifiedBySearch, true);
 });
 
 test("quality output always contains the seven requested criteria", () => {

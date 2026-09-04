@@ -25,6 +25,16 @@ function normalizeUrl(value) {
   }
 }
 
+function evidenceKey(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return null;
+  const url = new URL(normalized);
+  url.search = "";
+  let pathname = url.pathname.replace(/\/+$/, "");
+  if (!pathname) pathname = "/";
+  return `${url.hostname.replace(/^www\./, "").toLowerCase()}${pathname}`;
+}
+
 function extractWebEvidence(response) {
   const citations = [];
   const consultedUrls = [];
@@ -54,6 +64,8 @@ function extractWebEvidence(response) {
 function normalizeSources(rawSources, evidence = { citations: [], consultedUrls: [] }) {
   const citationMap = new Map((evidence.citations || []).map((item) => [normalizeUrl(item.url), item]));
   const consulted = new Set((evidence.consultedUrls || []).map(normalizeUrl).filter(Boolean));
+  const citedKeys = new Set((evidence.citations || []).map((item) => evidenceKey(item.url)).filter(Boolean));
+  const consultedKeys = new Set((evidence.consultedUrls || []).map(evidenceKey).filter(Boolean));
   const normalized = [];
   for (const [index, source] of (rawSources || []).entries()) {
     const url = normalizeUrl(source?.url);
@@ -66,7 +78,7 @@ function normalizeSources(rawSources, evidence = { citations: [], consultedUrls:
       url,
       publishedAt: String(source.publishedAt || "").trim(),
       supportedClaim: String(source.supportedClaim || "").trim(),
-      verifiedBySearch: Boolean(citation || consulted.has(url))
+      verifiedBySearch: Boolean(citation || consulted.has(url) || citedKeys.has(evidenceKey(url)) || consultedKeys.has(evidenceKey(url)))
     });
   }
   for (const citation of evidence.citations || []) {
@@ -184,4 +196,4 @@ function normalizeQuality(rawQuality, sources, referenceDate = new Date()) {
   return { overallScore, checks, evaluatedAt: new Date(referenceDate).toISOString() };
 }
 
-module.exports = { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, textLength, structureChecks, publicationGate };
+module.exports = { QUALITY_CRITERIA, cutoffDate, normalizeUrl, evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, textLength, structureChecks, publicationGate };

@@ -23,7 +23,7 @@ async function fetchBuffer(url, { timeout = 10000, maxBytes = 4_000_000 } = {}) 
   const response = await fetch(url, {
     redirect: "follow",
     signal: AbortSignal.timeout(timeout),
-    headers: { "User-Agent": "Mozilla/5.0 Instagram Career Research Studio/0.7" }
+    headers: { "User-Agent": "Mozilla/5.0 Instagram Career Research Studio/0.9.2" }
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const declared = Number(response.headers.get("content-length") || 0);
@@ -45,6 +45,23 @@ function iconLinks(html, pageUrl) {
   return [...new Set(links)];
 }
 
+function logoLinks(html, pageUrl) {
+  const links = [...iconLinks(html, pageUrl)];
+  const patterns = [
+    /<meta\b[^>]*(?:property|name|itemprop)\s*=\s*["'](?:og:logo|logo)["'][^>]*content\s*=\s*["']([^"']+)["'][^>]*>/gi,
+    /<meta\b[^>]*content\s*=\s*["']([^"']+)["'][^>]*(?:property|name|itemprop)\s*=\s*["'](?:og:logo|logo)["'][^>]*>/gi,
+    /["']logo["']\s*:\s*["']([^"']+)["']/gi,
+    /["']logo["']\s*:\s*\{[^}]*["']url["']\s*:\s*["']([^"']+)["']/gi
+  ];
+  for (const pattern of patterns) {
+    for (const match of String(html).matchAll(pattern)) {
+      try { links.push(new URL(match[1].replaceAll("\\/", "/"), pageUrl).toString()); }
+      catch { /* ignore malformed logo URL */ }
+    }
+  }
+  return [...new Set(links)];
+}
+
 async function normalizeLogo(buffer) {
   return sharp(buffer, { failOn: "none" })
     .resize(240, 96, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } })
@@ -59,7 +76,7 @@ async function fetchOfficialLogo(domain) {
   let candidates = [`https://${normalized}/favicon.ico`];
   try {
     const page = await fetchBuffer(homepage, { timeout: 12000, maxBytes: 2_000_000 });
-    candidates = [...iconLinks(page.buffer.toString("utf8"), page.finalUrl), ...candidates];
+    candidates = [...logoLinks(page.buffer.toString("utf8"), page.finalUrl), ...candidates];
   } catch { /* favicon and domain-based fallback may still work */ }
   candidates.push(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(normalized)}&sz=256`);
 
@@ -98,4 +115,4 @@ async function prepareCompanyLogos(content, directory) {
   return logos;
 }
 
-module.exports = { normalizeDomain, iconLinks, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
+module.exports = { normalizeDomain, iconLinks, logoLinks, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
