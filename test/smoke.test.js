@@ -31,6 +31,14 @@ test("Japanese wrapping preserves the text", () => {
   assert.ok(wrapJapanese(input, 6).length > 1);
 });
 
+test("editor save shows progress and prevents duplicate submission", async () => {
+  const html = await fs.readFile(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  assert.match(html, /保存・再生成中…/);
+  assert.match(html, /品質を再評価し、5枚の画像を再生成しています。/);
+  assert.match(html, /controls\.forEach\(\(control\) => \{ control\.disabled = true; \}\)/);
+  assert.match(html, /setAttribute\("aria-busy", "true"\)/);
+});
+
 test("Japanese wrapping does not start a line with closing punctuation", () => {
   const lines = wrapJapanese("情報を選ぶと、迷いが減る。", 7);
   assert.ok(lines.every((line) => !"、。！？）」』】".includes(line[0])));
