@@ -6,7 +6,7 @@ const { wrapJapanese, escapeXml, quantitativeSvg, comparisonSvg } = require("../
 const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, buildRepairRequest, repairFeedback, qualityRank, isBetterQuality, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
 const { contentTypes } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
-const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
+const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA, OVERALL_PASS_SCORE, minimumScoreFor } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
 const { normalizeDomain, domainHosts, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, logoDomains } = require("../src/logo");
 const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
@@ -215,37 +215,37 @@ test("repair feedback excludes freshness and URL failures that rewriting cannot 
   assert.ok(!feedback.includes("参照が存在するか: 参照元を追加"));
 });
 
-test("repair feedback prioritizes failed editorial checks before four-point polishing", () => {
+test("repair feedback prioritizes editorial checks below three", () => {
   const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
   const quality = {
     overallScore: 80,
-    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 4 ? 3 : 4, suggestion: `${criterion}を磨く` }))
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 4 ? 2 : 4, pass: index !== 4, suggestion: `${criterion}を磨く` }))
   };
   const feedback = repairFeedback(content, [], quality);
   assert.ok(feedback.some((item) => item.includes("見出しだけで意味が伝わるかを磨く")));
   assert.ok(!feedback.some((item) => item.includes("抽象論になっていないかを磨く")));
 });
 
-test("repair feedback polishes four-point checks only when no editorial check fails", () => {
+test("repair feedback polishes three-point checks when the total is below 75", () => {
   const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
   const quality = {
-    overallScore: 80,
-    checks: QUALITY_CRITERIA.map((criterion) => ({ criterion, score: 4, pass: true, suggestion: `${criterion}を磨く` }))
+    overallScore: 70,
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 0 ? 3 : 4, pass: true, suggestion: `${criterion}を磨く` }))
   };
   const feedback = repairFeedback(content, [], quality);
   assert.ok(feedback.some((item) => item.includes("抽象論になっていないかを磨く")));
   assert.ok(!feedback.some((item) => item.includes("参照が存在するかを磨く")));
 });
 
-test("a repair candidate is retained only when it improves publication readiness", () => {
+test("a repair candidate is retained only when it improves the 75-point publication gate", () => {
   const quality = (overallScore, scores) => ({
     overallScore,
-    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: scores[index], pass: scores[index] >= 4 }))
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: scores[index], pass: scores[index] >= minimumScoreFor(criterion) }))
   });
-  const original = quality(86, [4, 5, 5, 4, 4, 4, 4]);
+  const original = quality(77, [3, 5, 5, 3, 3, 4, 4]);
   const worseRepair = quality(69, [4, 5, 0, 4, 3, 4, 4]);
   const betterRepair = quality(91, [4, 5, 5, 5, 4, 4, 5]);
-  assert.deepEqual(qualityRank(original), [1, 0, 4, 86]);
+  assert.deepEqual(qualityRank(original), [1, 0, 3, 77]);
   assert.equal(isBetterQuality(worseRepair, original), false);
   assert.equal(isBetterQuality(betterRepair, original), true);
 });
@@ -270,7 +270,10 @@ test("web evidence verifies recent source URLs", () => {
   const evidence = extractWebEvidence(response);
   const sources = normalizeSources([{ title: "Report", publisher: "Example", url: "https://example.com/report", publishedAt: "2026-08-01", supportedClaim: "Market changed" }], evidence);
   assert.equal(sources[0].verifiedBySearch, true);
-  const checks = sourceChecks(sources.concat({ ...sources[0], url: "https://example.com/report-2" }), new Date("2026-08-30T00:00:00Z"));
+  const checks = sourceChecks(sources.concat(
+    { ...sources[0], url: "https://example.com/report-2" },
+    { ...sources[0], url: "https://example.com/report-3" }
+  ), new Date("2026-08-30T00:00:00Z"));
   assert.equal(checks.freshness.pass, true);
   assert.equal(checks.references.pass, true);
 });
@@ -291,11 +294,19 @@ test("quality output always contains the seven requested criteria", () => {
   assert.equal(quality.checks[2].pass, false);
 });
 
-test("publication gate requires 85 points and every criterion at least four", () => {
-  const readyQuality = { overallScore: 86, checks: QUALITY_CRITERIA.map((criterion) => ({ criterion, score: 4, pass: true })) };
+test("publication gate requires 75 points, source scores of four, and editorial scores of three", () => {
+  assert.equal(OVERALL_PASS_SCORE, 75);
+  assert.equal(minimumScoreFor(QUALITY_CRITERIA[0]), 3);
+  assert.equal(minimumScoreFor(QUALITY_CRITERIA[1]), 4);
+  const readyQuality = { overallScore: 77, checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 1 || index === 2 ? 5 : 3 })) };
   assert.equal(publicationGate(readyQuality).ready, true);
+  readyQuality.checks[0].score = 2;
+  assert.equal(publicationGate(readyQuality).ready, false);
   readyQuality.checks[0].score = 3;
-  readyQuality.checks[0].pass = false;
+  readyQuality.checks[2].score = 3;
+  assert.equal(publicationGate(readyQuality).ready, false);
+  readyQuality.checks[2].score = 5;
+  readyQuality.overallScore = 74;
   assert.equal(publicationGate(readyQuality).ready, false);
 });
 

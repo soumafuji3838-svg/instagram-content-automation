@@ -1,5 +1,5 @@
 const { getContentType } = require("./content-types");
-const { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality, structureChecks } = require("./quality");
+const { QUALITY_CRITERIA, OVERALL_PASS_SCORE, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality, structureChecks } = require("./quality");
 
 const FORBIDDEN_BRAND_PATTERN = /就活ねこ|就活ガイド|（デモ）|\(デモ\)/;
 
@@ -205,11 +205,11 @@ const qualitySchema = {
 function repairFeedback(content, sources, quality) {
   const editableChecks = (quality?.checks || [])
     .filter((check) => ![QUALITY_CRITERIA[1], QUALITY_CRITERIA[2]].includes(check.criterion));
-  const failedChecks = editableChecks.filter((check) => check.score < 4 || check.pass === false);
+  const failedChecks = editableChecks.filter((check) => check.score < 3 || check.pass === false);
   const targets = failedChecks.length
     ? failedChecks
-    : quality?.overallScore < 85
-      ? editableChecks.filter((check) => check.score < 5)
+    : quality?.overallScore < OVERALL_PASS_SCORE
+      ? editableChecks.filter((check) => check.score < 4)
       : [];
   const editorial = targets
     .map((check) => `${check.criterion}: ${check.suggestion || check.reason || "改善してください。"}`);
@@ -394,7 +394,7 @@ function buildQualityRequest({ content, sources, topic, contentType, targetYear 
     instructions: [
       "You are a strict Japanese social media editor. Evaluate the draft, do not rewrite it.",
       "Return all seven criteria exactly as provided, each scored from 0 to 5.",
-      "A score of 4 or 5 means it is ready for publication. Give specific reasons and actionable suggestions.",
+      "For editorial criteria, a score of 3 is acceptable for publication and 4 or 5 is strong. Scores 0 to 2 indicate a publication-blocking problem. Give specific reasons and actionable suggestions.",
       "For 抽象論 and 保存したくなる実用性, require a clear connection from verified IR facts to at least one of: working style, challenge opportunities, employee returns, or future career.",
       "Check that studentInsight is a cautious interpretation and introduces no uncited number, news item, policy, or unsupported certainty.",
       "Freshness and URL existence will also be checked programmatically, so focus on editorial judgment without assuming missing evidence."
@@ -529,10 +529,10 @@ async function evaluateContentQuality(input, referenceDate = new Date()) {
 
 function qualityRank(quality) {
   const checks = quality?.checks || [];
-  const failedCount = checks.filter((check) => check.score < 4 || check.pass === false).length;
+  const failedCount = checks.filter((check) => check.pass === false).length;
   const complete = checks.length === QUALITY_CRITERIA.length;
   const overall = Number(quality?.overallScore) || 0;
-  const ready = complete && failedCount === 0 && overall >= 85 ? 1 : 0;
+  const ready = complete && failedCount === 0 && overall >= OVERALL_PASS_SCORE ? 1 : 0;
   const minimum = complete ? Math.min(...checks.map((check) => Number(check.score) || 0)) : 0;
   return [ready, failedCount ? -failedCount : 0, minimum, overall];
 }
