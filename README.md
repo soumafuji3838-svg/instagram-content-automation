@@ -1,4 +1,4 @@
-# Instagram Content Quality MVP v0.9.6
+# Instagram Content Quality MVP v0.9.8
 
 テーマを入力すると、最新情報を調査した日本語のInstagramカルーセル原稿と5枚のPNG画像を生成し、承認後にInstagram Graph APIへ投稿するMVPです。
 
@@ -10,6 +10,7 @@
 - 1080×1350pxのカルーセルPNG生成
 - ブラウザ上でのプレビューと承認
 - 原稿編集後の画像再生成
+- 原稿保存・品質再評価・画像再生成中の進捗表示と二重送信防止
 - AI再生成、承認取り消し、投稿削除
 - Instagramログイン方式（`graph.instagram.com`）によるカルーセル投稿
 - Vercel Functionsでの実行とVercel Blobへの投稿・画像保存
