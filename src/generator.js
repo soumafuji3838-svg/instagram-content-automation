@@ -1,5 +1,5 @@
 const { getContentType } = require("./content-types");
-const { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality } = require("./quality");
+const { QUALITY_CRITERIA, OVERALL_PASS_SCORE, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality, structureChecks } = require("./quality");
 
 const FORBIDDEN_BRAND_PATTERN = /就活ねこ|就活ガイド|（デモ）|\(デモ\)/;
 
@@ -10,6 +10,9 @@ function resolveCta(account, contentType) {
 }
 
 function comparisonRowsFor(contentType) {
+  if (contentType === "industry_report") {
+    return ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"];
+  }
   return /company/.test(contentType)
     ? ["平均年収", "内定倍率", "直近3カ月の変化", "カルチャー"]
     : ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"];
@@ -199,6 +202,53 @@ const qualitySchema = {
   additionalProperties: false
 };
 
+function repairFeedback(content, sources, quality) {
+  const editableChecks = (quality?.checks || [])
+    .filter((check) => ![QUALITY_CRITERIA[1], QUALITY_CRITERIA[2]].includes(check.criterion));
+  const failedChecks = editableChecks.filter((check) => check.score < 3 || check.pass === false);
+  const targets = failedChecks.length
+    ? failedChecks
+    : quality?.overallScore < OVERALL_PASS_SCORE
+      ? editableChecks.filter((check) => check.score < 4)
+      : [];
+  const editorial = targets
+    .map((check) => `${check.criterion}: ${check.suggestion || check.reason || "改善してください。"}`);
+  return [...new Set([...structureChecks(content, sources), ...editorial])];
+}
+
+function buildRepairRequest({ content, sources, topic, contentType, targetYear, feedback }) {
+  return {
+    model: process.env.OPENAI_MODEL || "gpt-5.6",
+    reasoning: { effort: process.env.OPENAI_REASONING_EFFORT || "low" },
+    max_output_tokens: 16000,
+    instructions: [
+      "You are a meticulous Japanese editor repairing an Instagram carousel that failed a publication gate.",
+      "Return the complete corrected content object only. Do not perform new research.",
+      "Preserve every supported factual claim, number, company, and sourceIds value unless removing an unsupported or duplicated claim.",
+      "The comparison row labels are fixed. Rewrite each comparison value so it directly answers its row label using only already supplied cited facts. You may move an existing cited fact to the matching row or replace a mismatched value with 確認できず. Never substitute an unrelated fact.",
+      "Never invent or estimate a fact, number, date, news item, causal relationship, company policy, source id, or URL.",
+      "Keep facts separate from job-seeker interpretation. Phrase interpretation cautiously and turn it into a concrete recruiting-material or interview question.",
+      "Meet every Japanese character limit exactly. Count each Unicode character, including punctuation, as one character.",
+      "Prioritize every failed check over optional stylistic polishing. Silently verify each failed check again before returning the final object.",
+      "Every summary heading must be understandable without its body: include a concrete subject plus its action, cause, or effect within 10 Japanese characters. Generic fragments such as 出資・経営で収益, 外部変動リスク, or 非資源へ投資 are forbidden. Use only wording directly supported by the supplied sources.",
+      "Remove repeated ideas across pages and avoid exaggerated or unsupported certainty. Never generalize one company's fact to the whole industry or all three companies. If a fact is supported for only one company, name that company explicitly. A shared trend may be stated only when the supplied sources support it separately for every company concerned.",
+      "For company logo fields, use only an official hostname supported by the supplied verified sources. Do not invent a domain.",
+      "Keep exactly three quantitative metrics, three comparison columns, four comparison rows, and the existing five-page structure.",
+      "Keep the supplied CTA and base brand hashtags."
+    ].join("\n"),
+    input: JSON.stringify({
+      topic,
+      contentType: getContentType(contentType).label,
+      targetYear,
+      fixedComparisonRows: comparisonRowsFor(contentType),
+      failedChecks: feedback,
+      content,
+      sources
+    }),
+    text: { format: { type: "json_schema", name: "repaired_instagram_carousel", strict: true, schema: contentSchema } }
+  };
+}
+
 function demoContent({ topic, targetYear, account, contentType }) {
   const audience = targetYear || account.target;
   const type = getContentType(contentType);
@@ -286,6 +336,7 @@ function buildOpenAIRequest(input, referenceDate = new Date()) {
     instructions: [
       "You are a research editor for a Japanese Instagram account supporting university students' job hunting.",
       "You must use web search before writing. Prefer primary sources such as company IR/newsrooms, government publications, and official industry bodies.",
+      "Copy every source URL character-for-character from a URL actually returned by web search. Never translate a language path, change a filename, infer a sibling PDF, or construct a likely URL. If the exact URL was not returned by the search tool, do not list it as a source.",
       `Use sources published from ${cutoff.toISOString().slice(0, 10)} through ${today.toISOString().slice(0, 10)}. If a publication date cannot be confirmed, use an empty publishedAt and do not invent a date.`,
       "Provide at least 3 distinct sources. Every numerical, comparative, trend, or company claim must be traceable to a listed source.",
       "Separate facts from interpretation. Do not invent rankings, salaries, deadlines, market sizes, or corporate claims.",
@@ -304,10 +355,12 @@ function buildOpenAIRequest(input, referenceDate = new Date()) {
       "Write qualitative positive/negative titles in at most 10 Japanese characters, each explanation in 45-60 Japanese characters, and outlookText in 80-100 Japanese characters.",
       "Write qualitative.studentInsight in 45-70 Japanese characters and connect the outlook to a concrete career-research question.",
       "Search the web for three commonly compared industries or companies. Use the four comparison row labels exactly as supplied and keep each table cell concise.",
+      "Every comparison cell must directly answer its fixed row label. Never place profit figures under 市場成長性 or business segments under 主要企業. If the searched sources do not support a cell, write 確認できず instead of substituting a different fact.",
       "For each comparison column, set entityType to company or industry. For a company, provide its official website hostname in domain; for an industry, use an empty domain.",
       "If average salary or offer倍率 is not supported by a trustworthy source, write 非開示. Never estimate or infer it.",
       "Write imageQuery in English for a realistic working professional in the relevant industry. Avoid logos, uniforms with trademarks, illustrations, and staged handshakes.",
-      "Make every heading understandable by itself and avoid repeating the same fact across pages.",
+      "Make every heading understandable without its body by including a concrete subject plus its action, cause, or effect within 10 Japanese characters. Avoid generic fragments such as 出資・経営で収益, 外部変動リスク, or 非資源へ投資.",
+      "Never generalize one company's fact to the whole industry or all three companies. If evidence covers only one company, name it explicitly. State a shared trend only when separate supplied sources support it for every company concerned.",
       "Hashtags must begin with #.",
       "Never mention or hashtag 就活ねこ, 就活ガイド, or デモ.",
       "Use the supplied brand hashtags as the base hashtags and end the caption with the exact supplied call to action."
@@ -341,7 +394,7 @@ function buildQualityRequest({ content, sources, topic, contentType, targetYear 
     instructions: [
       "You are a strict Japanese social media editor. Evaluate the draft, do not rewrite it.",
       "Return all seven criteria exactly as provided, each scored from 0 to 5.",
-      "A score of 4 or 5 means it is ready for publication. Give specific reasons and actionable suggestions.",
+      "For editorial criteria, a score of 3 is acceptable for publication and 4 or 5 is strong. Scores 0 to 2 indicate a publication-blocking problem. Give specific reasons and actionable suggestions.",
       "For 抽象論 and 保存したくなる実用性, require a clear connection from verified IR facts to at least one of: working style, challenge opportunities, employee returns, or future career.",
       "Check that studentInsight is a cautious interpretation and introduces no uncited number, news item, policy, or unsupported certainty.",
       "Freshness and URL existence will also be checked programmatically, so focus on editorial judgment without assuming missing evidence."
@@ -474,12 +527,50 @@ async function evaluateContentQuality(input, referenceDate = new Date()) {
   return normalizeQuality(JSON.parse(extractOutputText(response)), input.sources || [], referenceDate);
 }
 
+function qualityRank(quality) {
+  const checks = quality?.checks || [];
+  const failedCount = checks.filter((check) => check.pass === false).length;
+  const complete = checks.length === QUALITY_CRITERIA.length;
+  const overall = Number(quality?.overallScore) || 0;
+  const ready = complete && failedCount === 0 && overall >= OVERALL_PASS_SCORE ? 1 : 0;
+  const minimum = complete ? Math.min(...checks.map((check) => Number(check.score) || 0)) : 0;
+  return [ready, failedCount ? -failedCount : 0, minimum, overall];
+}
+
+function isBetterQuality(candidate, current) {
+  const next = qualityRank(candidate);
+  const previous = qualityRank(current);
+  for (let index = 0; index < next.length; index += 1) {
+    if (next[index] !== previous[index]) return next[index] > previous[index];
+  }
+  return false;
+}
+
 async function generateWithOpenAI(input, referenceDate = new Date()) {
   const response = await callOpenAI(buildOpenAIRequest(input, referenceDate));
   const raw = JSON.parse(extractOutputText(response));
-  const content = applyAccountRules(validateContent(raw.content, input.contentType), input.account, input.contentType);
   const sources = normalizeSources(raw.sources, extractWebEvidence(response));
-  const quality = await evaluateContentQuality({ content, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+  let content = applyAccountRules(validateContent(raw.content, input.contentType), input.account, input.contentType);
+  let quality = await evaluateContentQuality({ content, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+  const maxRepairAttempts = Math.min(2, positiveInteger(process.env.OPENAI_MAX_REPAIR_ATTEMPTS, 1));
+  for (let attempt = 0; attempt < maxRepairAttempts; attempt += 1) {
+    const feedback = repairFeedback(content, sources, quality);
+    if (!feedback.length) break;
+    const repairResponse = await callOpenAI(buildRepairRequest({
+      content,
+      sources,
+      topic: input.topic,
+      contentType: input.contentType,
+      targetYear: input.targetYear,
+      feedback
+    }));
+    const candidateContent = applyAccountRules(validateContent(JSON.parse(extractOutputText(repairResponse)), input.contentType), input.account, input.contentType);
+    const candidateQuality = await evaluateContentQuality({ content: candidateContent, sources, topic: input.topic, contentType: input.contentType, targetYear: input.targetYear }, referenceDate);
+    if (isBetterQuality(candidateQuality, quality)) {
+      content = candidateContent;
+      quality = candidateQuality;
+    }
+  }
   return { content, sources, quality };
 }
 
@@ -502,6 +593,10 @@ module.exports = {
   extractOutputText,
   buildOpenAIRequest,
   buildQualityRequest,
+  buildRepairRequest,
+  repairFeedback,
+  qualityRank,
+  isBetterQuality,
   resolveCta,
   applyAccountRules,
   comparisonRowsFor

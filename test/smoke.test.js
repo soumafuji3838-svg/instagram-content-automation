@@ -3,12 +3,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { wrapJapanese, escapeXml, quantitativeSvg, comparisonSvg } = require("../src/renderer");
-const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
+const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, buildRepairRequest, repairFeedback, qualityRank, isBetterQuality, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
 const { contentTypes } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
-const { extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
+const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA, OVERALL_PASS_SCORE, minimumScoreFor } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
-const { normalizeDomain, iconLinks, logoDomains } = require("../src/logo");
+const { normalizeDomain, domainHosts, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, logoDomains } = require("../src/logo");
 const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
 const { authorizeRequest } = require("../src/app");
 const {
@@ -92,7 +92,8 @@ test("content validation normalizes hashtags without hash marks", () => {
 });
 
 test("comparison rows switch between industry and company formats", () => {
-  assert.deepEqual(comparisonRowsFor("industry_report"), ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
+  assert.deepEqual(comparisonRowsFor("industry_report"), ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
+  assert.deepEqual(comparisonRowsFor("industry_comparison"), ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
   assert.deepEqual(comparisonRowsFor("company_report"), ["平均年収", "内定倍率", "直近3カ月の変化", "カルチャー"]);
 });
 
@@ -110,6 +111,36 @@ test("official company domains are normalized and collected for logos", () => {
   assert.equal(normalizeDomain(content.subject.domain), "example.co.jp");
   assert.deepEqual(logoDomains(content), ["example.co.jp", "another.example.com"]);
   assert.deepEqual(iconLinks('<link rel="icon" href="/favicon.png">', "https://example.co.jp/about"), ["https://example.co.jp/favicon.png"]);
+});
+
+test("official logo discovery includes metadata and structured data", () => {
+  const html = [
+    '<link rel="icon" href="/favicon.png">',
+    '<meta property="og:logo" content="/brand/logo.svg">',
+    '<script type="application/ld+json">{"logo":"https:\\/\\/cdn.example.co.jp\\/logo.png"}</script>'
+  ].join("");
+  assert.deepEqual(logoLinks(html, "https://example.co.jp/about"), [
+    "https://example.co.jp/favicon.png",
+    "https://example.co.jp/brand/logo.svg",
+    "https://cdn.example.co.jp/logo.png"
+  ]);
+});
+
+test("logo discovery always retains the final domain favicon fallback", () => {
+  const primary = Array.from({ length: 12 }, (_, index) => `https://example.co.jp/icon-${index}.png`);
+  const fallbacks = logoFallbackUrls("example.co.jp");
+  const candidates = prioritizedLogoCandidates(primary, fallbacks);
+  assert.equal(candidates.length, 16);
+  assert.deepEqual(candidates.slice(-fallbacks.length), fallbacks);
+  assert.ok(fallbacks.some((url) => url.includes("domain_url=")));
+  assert.ok(fallbacks.some((url) => url.includes("t2.gstatic.com")));
+});
+
+test("logo discovery tries the official www host before the normalized apex host", () => {
+  assert.deepEqual(domainHosts("https://www.example.co.jp/news"), ["www.example.co.jp", "example.co.jp"]);
+  const fallbacks = logoFallbackUrls("example.co.jp");
+  assert.equal(fallbacks[0], "https://www.example.co.jp/favicon.ico");
+  assert.ok(fallbacks.some((url) => url.includes("domain=www.example.co.jp")));
 });
 
 test("company labels render as logos or generic icons instead of names", () => {
@@ -160,6 +191,71 @@ test("OpenAI request reserves output space and uses low reasoning", () => {
   }
 });
 
+test("repair request rewrites only supplied content without web search", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const request = buildRepairRequest({ content, sources: [], topic: "総合商社", contentType: "industry_report", targetYear: "28卒", feedback: ["短い"] });
+  assert.equal(request.tools, undefined);
+  assert.equal(request.text.format.strict, true);
+  assert.match(request.instructions, /Never invent or estimate/);
+  assert.match(request.instructions, /replace a mismatched value with 確認できず/);
+  assert.match(request.instructions, /Never generalize one company's fact/);
+  assert.deepEqual(JSON.parse(request.input).failedChecks, ["短い"]);
+  assert.deepEqual(JSON.parse(request.input).fixedComparisonRows, ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
+});
+
+test("repair feedback excludes freshness and URL failures that rewriting cannot fix", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const quality = { checks: QUALITY_CRITERIA.map((criterion) => ({
+    criterion,
+    score: criterion === QUALITY_CRITERIA[2] || criterion === QUALITY_CRITERIA[3] ? 2 : 5,
+    suggestion: criterion === QUALITY_CRITERIA[2] ? "参照元を追加" : "重複を削除"
+  })) };
+  const feedback = repairFeedback(content, [], quality);
+  assert.ok(feedback.some((item) => item.includes("重複を削除")));
+  assert.ok(!feedback.includes("参照が存在するか: 参照元を追加"));
+});
+
+test("repair feedback prioritizes editorial checks below three", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const quality = {
+    overallScore: 80,
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 4 ? 2 : 4, pass: index !== 4, suggestion: `${criterion}を磨く` }))
+  };
+  const feedback = repairFeedback(content, [], quality);
+  assert.ok(feedback.some((item) => item.includes("見出しだけで意味が伝わるかを磨く")));
+  assert.ok(!feedback.some((item) => item.includes("抽象論になっていないかを磨く")));
+});
+
+test("repair feedback polishes three-point checks when the total is below 75", () => {
+  const content = demoContent({ topic: "総合商社", targetYear: "28卒", account: accounts[0], contentType: "industry_report" });
+  const quality = {
+    overallScore: 70,
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 0 ? 3 : 4, pass: true, suggestion: `${criterion}を磨く` }))
+  };
+  const feedback = repairFeedback(content, [], quality);
+  assert.ok(feedback.some((item) => item.includes("抽象論になっていないかを磨く")));
+  assert.ok(!feedback.some((item) => item.includes("参照が存在するかを磨く")));
+});
+
+test("a repair candidate is retained only when it improves the 75-point publication gate", () => {
+  const quality = (overallScore, scores) => ({
+    overallScore,
+    checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: scores[index], pass: scores[index] >= minimumScoreFor(criterion) }))
+  });
+  const original = quality(77, [3, 5, 5, 3, 3, 4, 4]);
+  const worseRepair = quality(69, [4, 5, 0, 4, 3, 4, 4]);
+  const betterRepair = quality(91, [4, 5, 5, 5, 4, 4, 5]);
+  assert.deepEqual(qualityRank(original), [1, 0, 3, 77]);
+  assert.equal(isBetterQuality(worseRepair, original), false);
+  assert.equal(isBetterQuality(betterRepair, original), true);
+});
+
+test("research request requires exact URLs returned by web search", () => {
+  const request = buildOpenAIRequest({ topic: "総合商社", contentType: "industry_report", targetYear: "28卒", account: accounts[0], notes: "" });
+  assert.match(request.instructions, /Copy every source URL character-for-character/);
+  assert.deepEqual(JSON.parse(request.input).comparisonRows, ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
+});
+
 test("all requested content types are available", () => {
   assert.deepEqual(contentTypes.map((type) => type.id), ["industry_report", "company_report", "industry_comparison", "company_comparison", "trend_report"]);
 });
@@ -174,9 +270,20 @@ test("web evidence verifies recent source URLs", () => {
   const evidence = extractWebEvidence(response);
   const sources = normalizeSources([{ title: "Report", publisher: "Example", url: "https://example.com/report", publishedAt: "2026-08-01", supportedClaim: "Market changed" }], evidence);
   assert.equal(sources[0].verifiedBySearch, true);
-  const checks = sourceChecks(sources.concat({ ...sources[0], url: "https://example.com/report-2" }), new Date("2026-08-30T00:00:00Z"));
+  const checks = sourceChecks(sources.concat(
+    { ...sources[0], url: "https://example.com/report-2" },
+    { ...sources[0], url: "https://example.com/report-3" }
+  ), new Date("2026-08-30T00:00:00Z"));
   assert.equal(checks.freshness.pass, true);
   assert.equal(checks.references.pass, true);
+});
+
+test("web evidence matching ignores tracking parameters and www", () => {
+  assert.equal(evidenceKey("https://www.example.com/report/?utm_source=x"), "example.com/report");
+  const sources = normalizeSources([
+    { id: "S1", title: "Report", url: "https://example.com/report?ref=feed", publishedAt: "2026-08-01" }
+  ], { citations: [], consultedUrls: ["https://www.example.com/report/?utm_source=search"] });
+  assert.equal(sources[0].verifiedBySearch, true);
 });
 
 test("quality output always contains the seven requested criteria", () => {
@@ -187,11 +294,19 @@ test("quality output always contains the seven requested criteria", () => {
   assert.equal(quality.checks[2].pass, false);
 });
 
-test("publication gate requires 85 points and every criterion at least four", () => {
-  const readyQuality = { overallScore: 86, checks: QUALITY_CRITERIA.map((criterion) => ({ criterion, score: 4, pass: true })) };
+test("publication gate requires 75 points, source scores of four, and editorial scores of three", () => {
+  assert.equal(OVERALL_PASS_SCORE, 75);
+  assert.equal(minimumScoreFor(QUALITY_CRITERIA[0]), 3);
+  assert.equal(minimumScoreFor(QUALITY_CRITERIA[1]), 4);
+  const readyQuality = { overallScore: 77, checks: QUALITY_CRITERIA.map((criterion, index) => ({ criterion, score: index === 1 || index === 2 ? 5 : 3 })) };
   assert.equal(publicationGate(readyQuality).ready, true);
+  readyQuality.checks[0].score = 2;
+  assert.equal(publicationGate(readyQuality).ready, false);
   readyQuality.checks[0].score = 3;
-  readyQuality.checks[0].pass = false;
+  readyQuality.checks[2].score = 3;
+  assert.equal(publicationGate(readyQuality).ready, false);
+  readyQuality.checks[2].score = 5;
+  readyQuality.overallScore = 74;
   assert.equal(publicationGate(readyQuality).ready, false);
 });
 

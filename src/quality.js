@@ -8,6 +8,13 @@ const QUALITY_CRITERIA = [
   "誇張や根拠のない断定がないか"
 ];
 
+const OVERALL_PASS_SCORE = 75;
+const SOURCE_CRITERIA = new Set([QUALITY_CRITERIA[1], QUALITY_CRITERIA[2]]);
+
+function minimumScoreFor(criterion) {
+  return SOURCE_CRITERIA.has(criterion) ? 4 : 3;
+}
+
 function cutoffDate(referenceDate = new Date()) {
   const date = new Date(referenceDate);
   date.setUTCMonth(date.getUTCMonth() - 3);
@@ -23,6 +30,16 @@ function normalizeUrl(value) {
   } catch {
     return null;
   }
+}
+
+function evidenceKey(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return null;
+  const url = new URL(normalized);
+  url.search = "";
+  let pathname = url.pathname.replace(/\/+$/, "");
+  if (!pathname) pathname = "/";
+  return `${url.hostname.replace(/^www\./, "").toLowerCase()}${pathname}`;
 }
 
 function extractWebEvidence(response) {
@@ -54,6 +71,8 @@ function extractWebEvidence(response) {
 function normalizeSources(rawSources, evidence = { citations: [], consultedUrls: [] }) {
   const citationMap = new Map((evidence.citations || []).map((item) => [normalizeUrl(item.url), item]));
   const consulted = new Set((evidence.consultedUrls || []).map(normalizeUrl).filter(Boolean));
+  const citedKeys = new Set((evidence.citations || []).map((item) => evidenceKey(item.url)).filter(Boolean));
+  const consultedKeys = new Set((evidence.consultedUrls || []).map(evidenceKey).filter(Boolean));
   const normalized = [];
   for (const [index, source] of (rawSources || []).entries()) {
     const url = normalizeUrl(source?.url);
@@ -66,7 +85,7 @@ function normalizeSources(rawSources, evidence = { citations: [], consultedUrls:
       url,
       publishedAt: String(source.publishedAt || "").trim(),
       supportedClaim: String(source.supportedClaim || "").trim(),
-      verifiedBySearch: Boolean(citation || consulted.has(url))
+      verifiedBySearch: Boolean(citation || consulted.has(url) || citedKeys.has(evidenceKey(url)) || consultedKeys.has(evidenceKey(url)))
     });
   }
   for (const citation of evidence.citations || []) {
@@ -126,9 +145,9 @@ function structureChecks(content, sources = []) {
 function publicationGate(quality, content, sources, companyLogos = {}) {
   const checks = quality?.checks || [];
   const failed = [];
-  if (!quality || quality.overallScore < 85) failed.push("総合評価が85点未満です。");
+  if (!quality || quality.overallScore < OVERALL_PASS_SCORE) failed.push(`総合評価が${OVERALL_PASS_SCORE}点未満です。`);
   for (const check of checks) {
-    if (check.score < 4 || !check.pass) failed.push(`${check.criterion}が公開基準を満たしていません。`);
+    if (check.score < minimumScoreFor(check.criterion)) failed.push(`${check.criterion}が公開基準を満たしていません。`);
   }
   if (checks.length !== QUALITY_CRITERIA.length) failed.push("品質評価7項目がそろっていません。");
   if (content) failed.push(...structureChecks(content, sources));
@@ -157,9 +176,9 @@ function sourceChecks(sources, referenceDate = new Date()) {
     references: {
       criterion: QUALITY_CRITERIA[2],
       score: verified.length >= 3 ? 5 : verified.length >= 2 ? 3 : 0,
-      pass: verified.length >= 2,
+      pass: verified.length >= 3,
       reason: `${sources.length}件中${verified.length}件をWeb検索結果で確認しました。`,
-      suggestion: verified.length >= 2 ? "参照URLを確認済みです。" : "Web検索で確認できる参照元を2件以上追加してください。"
+      suggestion: verified.length >= 3 ? "参照URLを確認済みです。" : "Web検索で確認できる参照元を3件以上追加してください。"
     }
   };
 }
@@ -175,7 +194,7 @@ function normalizeQuality(rawQuality, sources, referenceDate = new Date()) {
     return {
       criterion,
       score,
-      pass: score >= 4,
+      pass: score >= minimumScoreFor(criterion),
       reason: String(check.reason || "評価結果がありません。"),
       suggestion: String(check.suggestion || "具体的な根拠と行動を追加してください。")
     };
@@ -184,4 +203,4 @@ function normalizeQuality(rawQuality, sources, referenceDate = new Date()) {
   return { overallScore, checks, evaluatedAt: new Date(referenceDate).toISOString() };
 }
 
-module.exports = { QUALITY_CRITERIA, cutoffDate, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, textLength, structureChecks, publicationGate };
+module.exports = { QUALITY_CRITERIA, OVERALL_PASS_SCORE, minimumScoreFor, cutoffDate, normalizeUrl, evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, textLength, structureChecks, publicationGate };
