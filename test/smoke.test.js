@@ -8,7 +8,7 @@ const { contentTypes } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
 const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
-const { normalizeDomain, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, logoDomains } = require("../src/logo");
+const { normalizeDomain, domainHosts, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, logoDomains } = require("../src/logo");
 const { graphUrl, graphPost, publicAssetUrls, verifyInstagramConnection } = require("../src/instagram");
 const { authorizeRequest } = require("../src/app");
 const {
@@ -129,10 +129,17 @@ test("logo discovery always retains the final domain favicon fallback", () => {
   const primary = Array.from({ length: 12 }, (_, index) => `https://example.co.jp/icon-${index}.png`);
   const fallbacks = logoFallbackUrls("example.co.jp");
   const candidates = prioritizedLogoCandidates(primary, fallbacks);
-  assert.equal(candidates.length, 12);
+  assert.equal(candidates.length, 16);
   assert.deepEqual(candidates.slice(-fallbacks.length), fallbacks);
   assert.ok(fallbacks.some((url) => url.includes("domain_url=")));
   assert.ok(fallbacks.some((url) => url.includes("t2.gstatic.com")));
+});
+
+test("logo discovery tries the official www host before the normalized apex host", () => {
+  assert.deepEqual(domainHosts("https://www.example.co.jp/news"), ["www.example.co.jp", "example.co.jp"]);
+  const fallbacks = logoFallbackUrls("example.co.jp");
+  assert.equal(fallbacks[0], "https://www.example.co.jp/favicon.ico");
+  assert.ok(fallbacks.some((url) => url.includes("domain=www.example.co.jp")));
 });
 
 test("company labels render as logos or generic icons instead of names", () => {
@@ -190,6 +197,7 @@ test("repair request rewrites only supplied content without web search", () => {
   assert.equal(request.text.format.strict, true);
   assert.match(request.instructions, /Never invent or estimate/);
   assert.match(request.instructions, /replace a mismatched value with 確認できず/);
+  assert.match(request.instructions, /Never generalize one company's fact/);
   assert.deepEqual(JSON.parse(request.input).failedChecks, ["短い"]);
   assert.deepEqual(JSON.parse(request.input).fixedComparisonRows, ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
 });

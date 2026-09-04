@@ -228,7 +228,7 @@ function buildRepairRequest({ content, sources, topic, contentType, targetYear, 
       "Meet every Japanese character limit exactly. Count each Unicode character, including punctuation, as one character.",
       "Prioritize every failed check over optional stylistic polishing. Silently verify each failed check again before returning the final object.",
       "Every summary heading must be understandable without its body: include a concrete subject plus its action, cause, or effect within 10 Japanese characters. Generic fragments such as 出資・経営で収益, 外部変動リスク, or 非資源へ投資 are forbidden. Use only wording directly supported by the supplied sources.",
-      "Remove repeated ideas across pages and avoid exaggerated or unsupported certainty. Do not generalize one company's fact to all three companies.",
+      "Remove repeated ideas across pages and avoid exaggerated or unsupported certainty. Never generalize one company's fact to the whole industry or all three companies. If a fact is supported for only one company, name that company explicitly. A shared trend may be stated only when the supplied sources support it separately for every company concerned.",
       "For company logo fields, use only an official hostname supported by the supplied verified sources. Do not invent a domain.",
       "Keep exactly three quantitative metrics, three comparison columns, four comparison rows, and the existing five-page structure.",
       "Keep the supplied CTA and base brand hashtags."
@@ -355,7 +355,8 @@ function buildOpenAIRequest(input, referenceDate = new Date()) {
       "For each comparison column, set entityType to company or industry. For a company, provide its official website hostname in domain; for an industry, use an empty domain.",
       "If average salary or offer倍率 is not supported by a trustworthy source, write 非開示. Never estimate or infer it.",
       "Write imageQuery in English for a realistic working professional in the relevant industry. Avoid logos, uniforms with trademarks, illustrations, and staged handshakes.",
-      "Make every heading understandable without its body by including a concrete subject plus its action, cause, or effect within 10 Japanese characters. Avoid generic fragments such as 出資・経営で収益, 外部変動リスク, or 非資源へ投資. Do not generalize one company's fact to all three companies.",
+      "Make every heading understandable without its body by including a concrete subject plus its action, cause, or effect within 10 Japanese characters. Avoid generic fragments such as 出資・経営で収益, 外部変動リスク, or 非資源へ投資.",
+      "Never generalize one company's fact to the whole industry or all three companies. If evidence covers only one company, name it explicitly. State a shared trend only when separate supplied sources support it for every company concerned.",
       "Hashtags must begin with #.",
       "Never mention or hashtag 就活ねこ, 就活ガイド, or デモ.",
       "Use the supplied brand hashtags as the base hashtags and end the caption with the exact supplied call to action."

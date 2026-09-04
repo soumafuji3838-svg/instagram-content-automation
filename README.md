@@ -1,4 +1,4 @@
-# Instagram Content Quality MVP v0.9.4
+# Instagram Content Quality MVP v0.9.5
 
 テーマを入力すると、最新情報を調査した日本語のInstagramカルーセル原稿と5枚のPNG画像を生成し、承認後にInstagram Graph APIへ投稿するMVPです。
 

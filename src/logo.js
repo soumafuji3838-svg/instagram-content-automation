@@ -72,23 +72,33 @@ async function normalizeLogo(buffer) {
     .toBuffer();
 }
 
-function logoFallbackUrls(domain) {
+function domainHosts(domain) {
   const normalized = normalizeDomain(domain);
   if (!normalized) return [];
-  const homepage = `https://${normalized}/`;
+  return [`www.${normalized}`, normalized];
+}
+
+function logoFallbackUrls(domain) {
+  const hosts = domainHosts(domain);
+  if (!hosts.length) return [];
+  const [wwwHost, apexHost] = hosts;
+  const officialHome = `https://${wwwHost}/`;
   return [
-    `https://${normalized}/favicon.ico`,
-    `https://${normalized}/favicon.png`,
-    `https://${normalized}/apple-touch-icon.png`,
-    `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(homepage)}&sz=256`,
-    `https://www.google.com/s2/favicons?domain=${encodeURIComponent(normalized)}&sz=256`,
-    `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent(homepage)}&size=256`,
-    `https://unavatar.io/${normalized}?fallback=false`,
-    `https://icons.duckduckgo.com/ip3/${normalized}.ico`
+    `https://${wwwHost}/favicon.ico`,
+    `https://${wwwHost}/favicon.png`,
+    `https://${wwwHost}/apple-touch-icon.png`,
+    `https://${apexHost}/favicon.ico`,
+    `https://${apexHost}/favicon.png`,
+    `https://${apexHost}/apple-touch-icon.png`,
+    `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(officialHome)}&sz=256`,
+    `https://www.google.com/s2/favicons?domain=${encodeURIComponent(wwwHost)}&sz=256`,
+    `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent(officialHome)}&size=256`,
+    `https://unavatar.io/${wwwHost}?fallback=false`,
+    `https://icons.duckduckgo.com/ip3/${wwwHost}.ico`
   ];
 }
 
-function prioritizedLogoCandidates(candidates, fallbackUrls, limit = 12) {
+function prioritizedLogoCandidates(candidates, fallbackUrls, limit = 16) {
   const fallbacks = [...new Set(Array.isArray(fallbackUrls) ? fallbackUrls : [fallbackUrls])].filter(Boolean);
   const fallbackSet = new Set(fallbacks);
   const primary = [...new Set(candidates)]
@@ -100,12 +110,17 @@ function prioritizedLogoCandidates(candidates, fallbackUrls, limit = 12) {
 async function fetchOfficialLogo(domain) {
   const normalized = normalizeDomain(domain);
   if (!normalized) return { buffer: null, metadata: { domain: "", status: "not_applicable" } };
-  const homepage = `https://${normalized}/`;
-  let candidates = [`https://${normalized}/favicon.ico`];
-  try {
-    const page = await fetchBuffer(homepage, { timeout: 12000, maxBytes: 2_000_000 });
-    candidates = [...logoLinks(page.buffer.toString("utf8"), page.finalUrl), ...candidates];
-  } catch { /* favicon and domain-based fallback may still work */ }
+  const homepageUrls = domainHosts(normalized).map((host) => `https://${host}/`);
+  const candidates = [];
+  const discoveryErrors = [];
+  for (const homepage of homepageUrls) {
+    try {
+      const page = await fetchBuffer(homepage, { timeout: 12000, maxBytes: 2_000_000 });
+      candidates.push(...logoLinks(page.buffer.toString("utf8"), page.finalUrl));
+    } catch (error) {
+      discoveryErrors.push({ url: homepage, error: String(error?.message || error).slice(0, 240) });
+    }
+  }
   const fallbackUrls = logoFallbackUrls(normalized);
   const attemptedUrls = [];
   const errors = [];
@@ -120,7 +135,7 @@ async function fetchOfficialLogo(domain) {
       errors.push({ url, error: String(error?.message || error).slice(0, 240) });
     }
   }
-  return { buffer: null, metadata: { domain: normalized, status: "failed", attempted: attemptedUrls.length, errors } };
+  return { buffer: null, metadata: { domain: normalized, status: "failed", attempted: attemptedUrls.length, discoveryErrors, errors } };
 }
 
 function logoDomains(content) {
@@ -148,4 +163,4 @@ async function prepareCompanyLogos(content, directory) {
   return logos;
 }
 
-module.exports = { normalizeDomain, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
+module.exports = { normalizeDomain, domainHosts, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
