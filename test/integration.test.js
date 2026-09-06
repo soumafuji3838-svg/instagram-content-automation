@@ -54,6 +54,16 @@ test("create, edit, approve, dry-run, regenerate, and delete", async () => {
     assert.equal(edited.content.title, "編集後の表紙タイトル");
     assert.equal(edited.status, "review");
 
+    const blocked = await fetch(`${base}/api/posts/${created.body.id}/approve`, { method: "POST" });
+    assert.equal(blocked.status, 409);
+    const photo = await require("sharp")({ create: { width: 40, height: 40, channels: 3, background: "white" } }).png().toBuffer();
+    const cover = await fetch(`${base}/api/posts/${created.body.id}/cover`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data: photo.toString("base64"), rightsConfirmed: true }) });
+    assert.equal(cover.status, 200);
+    const reviewed = await fetch(`${base}/api/posts/${created.body.id}/image-review`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ checks: [true, true, true, true, true] }) });
+    assert.equal(reviewed.status, 200);
+    const plan = await fetch(`${base}/api/auto-publish/plan`).then(r => r.json());
+    assert.equal(plan.enabled, false);
+    assert.equal(plan.plans.find(p => p.postId === created.body.id).willPublish, false);
     const approved = await fetch(`${base}/api/posts/${created.body.id}/approve`, { method: "POST" }).then((response) => response.json());
     assert.equal(approved.status, "approved");
 

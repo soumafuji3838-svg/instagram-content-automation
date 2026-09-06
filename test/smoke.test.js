@@ -34,7 +34,7 @@ test("Japanese wrapping preserves the text", () => {
 test("editor save shows progress and prevents duplicate submission", async () => {
   const html = await fs.readFile(path.join(__dirname, "..", "public", "index.html"), "utf8");
   assert.match(html, /保存・再生成中…/);
-  assert.match(html, /品質を再評価し、5枚の画像を再生成しています。/);
+  assert.match(html, /文字数を自動調整し、品質評価と5枚の画像生成を行っています。/);
   assert.match(html, /controls\.forEach\(\(control\) => \{ control\.disabled = true; \}\)/);
   assert.match(html, /setAttribute\("aria-busy", "true"\)/);
 });
