@@ -4,12 +4,15 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { loadEnv } = require("./env");
 const { ensureStore, listPosts, createPost, getPost, updatePost, deletePost } = require("./store");
-const { generateCarousel, validateContent, evaluateContentQuality } = require("./generator");
+const { generateCarousel, validateContent, evaluateContentQuality, normalizeTextLengths, autoImproveQuality } = require("./generator");
+const { lengthIssues } = require("./text-length");
 const { contentTypes, getContentType } = require("./content-types");
 const { renderCarousel } = require("./renderer");
 const { publishCarousel } = require("./instagram");
 const { streamPostExport } = require("./exporter");
-const { fetchCoverPhoto, restoreCoverPhoto } = require("./photo");
+const { fetchCoverPhoto, restoreCoverPhoto, uploadedCoverPhoto } = require("./photo");
+const { checks: imageChecks, fingerprint, imageReviewReady } = require("./image-review");
+const { planAutomaticPublication } = require("./auto-publish");
 const { publicationGate } = require("./quality");
 const { outputRoot } = require("./runtime-paths");
 const { storageMode, persistRenderedAssets, deleteBlobAssets } = require("./blob-storage");
@@ -99,6 +102,7 @@ async function handler(req, res) {
     if (req.method === "GET" && url.pathname === "/api/config") {
       return json(res, 200, {
         accounts,
+        imageChecks,
         contentTypes,
         dryRun: process.env.INSTAGRAM_DRY_RUN !== "false",
         openAIConfigured: Boolean(process.env.OPENAI_API_KEY),
@@ -109,6 +113,7 @@ async function handler(req, res) {
       });
     }
     if (req.method === "GET" && url.pathname === "/api/posts") return json(res, 200, await listPosts());
+    if (req.method === "GET" && url.pathname === "/api/auto-publish/plan") return json(res, 200, { enabled: false, plans: (await listPosts()).map(planAutomaticPublication) });
 
     const exportMatch = url.pathname.match(/^\/api\/posts\/([^/]+)\/export$/);
     if (req.method === "GET" && exportMatch) {
@@ -134,19 +139,43 @@ async function handler(req, res) {
       return json(res, 201, post);
     }
 
+    const imageMatch = url.pathname.match(/^\/api\/posts\/([^/]+)\/(cover|image-review)$/);
+    if (req.method === "POST" && imageMatch) {
+      const existing = await getPost(imageMatch[1]);
+      if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
+      if (["published", "publishing", "publish_unknown"].includes(existing.status)) return json(res, 409, { error: "公開済み・公開処理中の投稿は変更できません。新しい投稿を作成してください。" });
+      const body = await readBody(req);
+      if (imageMatch[2] === "image-review") {
+        if (existing.coverPhoto?.status !== "ready" || !imageChecks.every((_, i) => body.checks?.[i] === true)) return json(res, 409, { error: "表紙写真とすべての画像チェック項目を確認してください。" });
+        return json(res, 200, await updatePost(existing.id, { imageReview: { checks: imageChecks.map(() => true), fingerprint: fingerprint(existing), reviewedAt: new Date().toISOString(), method: "human" }, status: "review", approvedAt: null }));
+      }
+      if (body.data && body.rightsConfirmed !== true) return json(res, 400, { error: "アップロード画像の利用権を確認してください。" });
+      const query = String(body.query || existing.content.imageQuery).trim().slice(0, 200);
+      const coverPhoto = body.data ? await uploadedCoverPhoto(body.data) : await fetchCoverPhoto(query, existing.coverPhoto?.id);
+      if (!coverPhoto.buffer) return json(res, 422, { error: coverPhoto.metadata.error || "写真を取得できません。検索語を変更してください。" });
+      const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
+      const rendered = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: existing.content, account, coverPhoto });
+      const assets = await persistRenderedAssets(existing.id, rendered);
+      const post = await updatePost(existing.id, { coverPhoto: coverPhoto.metadata, assets, imageReview: null, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      await deleteBlobAssets(existing.assets).catch(() => {});
+      return json(res, 200, post);
+    }
+
     const postMatch = url.pathname.match(/^\/api\/posts\/([^/]+)$/);
     if (req.method === "PUT" && postMatch) {
       const existing = await getPost(postMatch[1]);
       if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
       const body = await readBody(req);
-      const content = validateContent(body.content, existing.contentType);
+      let content = validateContent(body.content, existing.contentType);
+      if (["published", "publishing", "publish_unknown"].includes(existing.status)) return json(res, 409, { error: "公開済み・公開処理中の投稿は編集できません。" });
+      if (existing.generationSource !== "demo") content = validateContent(await normalizeTextLengths({ ...existing, content }), existing.contentType);
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const quality = await evaluateContentQuality({ content, sources: existing.sources || [], topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear });
       const coverPhoto = await restoreCoverPhoto(existing.coverPhoto);
       const renderedAssets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account, coverPhoto });
       const companyLogos = await readLogoMetadata(existing.id);
       const assets = await persistRenderedAssets(existing.id, renderedAssets);
-      const post = await updatePost(existing.id, { content, companyLogos, quality, assets, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      const post = await updatePost(existing.id, { imageReview: null, content, companyLogos, quality, assets, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       await deleteBlobAssets(existing.assets).catch((error) => console.warn(`古いBlob画像の削除をスキップしました: ${error.message}`));
       return json(res, 200, post);
     }
@@ -169,13 +198,14 @@ async function handler(req, res) {
     if (req.method === "POST" && regenerateMatch) {
       const existing = await getPost(regenerateMatch[1]);
       if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
+      if (["published", "publishing", "publish_unknown"].includes(existing.status)) return json(res, 409, { error: "公開済み・公開処理中の投稿は再生成できません。" });
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const generated = await generateCarousel({ topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear, notes: existing.notes || "", account });
       const coverPhoto = await fetchCoverPhoto(generated.content.imageQuery);
       const renderedAssets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: generated.content, account, coverPhoto });
       const companyLogos = await readLogoMetadata(existing.id);
       const assets = await persistRenderedAssets(existing.id, renderedAssets);
-      const post = await updatePost(existing.id, { content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, generationSource: generated.source, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      const post = await updatePost(existing.id, { imageReview: null, content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, generationSource: generated.source, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       await deleteBlobAssets(existing.assets).catch((error) => console.warn(`古いBlob画像の削除をスキップしました: ${error.message}`));
       return json(res, 200, post);
     }
@@ -184,6 +214,23 @@ async function handler(req, res) {
     if (req.method === "POST" && approveMatch) {
       const existing = await getPost(approveMatch[1]);
       if (!existing) return json(res, 404, { error: "投稿が見つかりません。" });
+      if (!["review", "approved"].includes(existing.status)) return json(res, 409, { error: "確認待ちの投稿のみ承認できます。" });
+      if (existing.generationSource !== "demo" && !publicationGate(existing.quality, existing.content, existing.sources || [], existing.companyLogos || {}).ready) {
+        const account = accounts.find(item => item.id === existing.accountId) || accounts[0];
+        const improved = await autoImproveQuality({ ...existing, account });
+        const { content, sources, quality } = improved;
+        const coverPhoto = await restoreCoverPhoto(existing.coverPhoto);
+        if (existing.coverPhoto?.status === "ready" && !coverPhoto?.buffer) return json(res, 422, { error: "表紙の復元に失敗しました。元の原稿は変更していません。再実行してください。" });
+        const rendered = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account, coverPhoto });
+        const assets = await persistRenderedAssets(existing.id, rendered);
+        const companyLogos = await readLogoMetadata(existing.id);
+        const finalGate = publicationGate(quality, content, sources, companyLogos);
+        const report = { ...improved.repairReport, ready: finalGate.ready, failed: finalGate.failed, completedAt: new Date().toISOString() };
+        const saved = await updatePost(existing.id, { content, sources, quality, assets, companyLogos, imageReview: null, status: "review", approvedAt: null, qualityRepair: report });
+        await deleteBlobAssets(existing.assets).catch(() => {});
+        return json(res, 200, { ...saved, notice: finalGate.ready ? `自動改善後の総合評価は${quality.overallScore}点で公開基準に合格しました。再調査・修正で内容が変わる場合があります。原稿と画像を確認し、画像チェックを記録して再度承認してください。` : `自動改善を実行しましたが、まだ合格していません（${quality.overallScore}点）。 ${finalGate.failed.join(" ")} ${report.attempts.filter(a => a.error).map(a => a.error).join(" ")} 投稿は行っていません。` });
+      }
+      if (!imageReviewReady(existing)) return json(res, 409, { error: "表紙の画像チェックが未完了です。写真を確認し、全項目を記録してください。" });
       const gate = publicationGate(existing.quality, existing.content, existing.sources || [], existing.companyLogos || {});
       if (existing.generationSource !== "demo" && !gate.ready) return json(res, 409, { error: `公開基準を満たしていません。 ${gate.failed.join(" ")}` });
       const post = await updatePost(approveMatch[1], { status: "approved", approvedAt: new Date().toISOString() });
@@ -201,6 +248,10 @@ async function handler(req, res) {
       const post = await getPost(publishMatch[1]);
       if (!post) return json(res, 404, { error: "投稿が見つかりません。" });
       if (post.status !== "approved") return json(res, 409, { error: "公開前に承認してください。" });
+      if (!imageReviewReady(post)) return json(res, 409, { error: "画像チェックをやり直してください。" });
+      const gate = publicationGate(post.quality, post.content, post.sources || [], post.companyLogos || {});
+      if (post.generationSource === "demo" && process.env.INSTAGRAM_DRY_RUN === "false") return json(res, 409, { error: "デモ投稿は実公開できません。" });
+      if (post.generationSource !== "demo" && !gate.ready) return json(res, 409, { error: gate.failed.join(" ") });
       const result = await publishCarousel(post);
       const saved = await updatePost(post.id, { status: result.dryRun ? "dry_run_complete" : "published", publishResult: result, publishedAt: new Date().toISOString() });
       return json(res, 200, saved);

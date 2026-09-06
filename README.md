@@ -1,4 +1,6 @@
-# Instagram Content Quality MVP v0.9.8
+# Instagram Content Quality MVP v0.9.11
+
+グラフ配置・表紙差し替え・画像の手動確認を追加しました。適用と検証手順、自動投稿の未実装範囲は `UPDATE-v0.9.11.md` を参照してください。
 
 テーマを入力すると、最新情報を調査した日本語のInstagramカルーセル原稿と5枚のPNG画像を生成し、承認後にInstagram Graph APIへ投稿するMVPです。
 

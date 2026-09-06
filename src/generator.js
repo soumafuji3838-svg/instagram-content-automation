@@ -1,4 +1,6 @@
 const { getContentType } = require("./content-types");
+const { lengthIssues, repairTextLengths } = require("./text-length");
+const { improveQuality } = require("./quality-repair");
 const { QUALITY_CRITERIA, OVERALL_PASS_SCORE, cutoffDate, extractWebEvidence, normalizeSources, normalizeQuality, structureChecks } = require("./quality");
 
 const FORBIDDEN_BRAND_PATTERN = /就活ねこ|就活ガイド|（デモ）|\(デモ\)/;
@@ -527,6 +529,40 @@ async function evaluateContentQuality(input, referenceDate = new Date()) {
   return normalizeQuality(JSON.parse(extractOutputText(response)), input.sources || [], referenceDate);
 }
 
+async function normalizeTextLengths(input) {
+  if (!lengthIssues(input.content).length) return input.content;
+  if (!process.env.OPENAI_API_KEY) throw new Error("文字数の自動調整にはOpenAI接続が必要です。");
+  return repairTextLengths(input.content, async (content, issues) => {
+    const request = buildRepairRequest({ ...input, content, feedback: issues.map(i => `${i.section}.${i.key}: 現在${i.current}文字。${i.min}〜${i.max}文字、目標${Math.floor((i.min + i.max) / 2)}文字。`) });
+    request.instructions += "\nThis is a LENGTH-ONLY rewrite. Change only the listed failing fields. Preserve all facts, numeric tokens, named companies, attribution, uncertainty, and source IDs. Do not add factual claims or generic padding. Expand by explaining the same existing meaning; shorten by removing redundant phrasing. Return the complete content object. Other fields must stay identical.";
+    const response = await callOpenAI(request);
+    return JSON.parse(extractOutputText(response));
+  });
+}
+
+async function autoImproveQuality(input, referenceDate = new Date()) {
+  if (!process.env.OPENAI_API_KEY) throw new Error("総合評価の自動改善にはOpenAI接続が必要です。");
+  const initial = { content: input.content, sources: input.sources || [], quality: await evaluateContentQuality(input, referenceDate) };
+  return improveQuality(initial, {
+    rewrite: async current => {
+      const request = buildRepairRequest({ ...input, ...current, feedback: repairFeedback(current.content, current.sources, current.quality) });
+      const response = await callOpenAI(request);
+      let content = applyAccountRules(validateContent(JSON.parse(extractOutputText(response)), input.contentType), input.account, input.contentType);
+      content = validateContent(await normalizeTextLengths({ ...input, ...current, content }), input.contentType);
+      return { content, sources: current.sources, quality: await evaluateContentQuality({ ...input, content, sources: current.sources }, referenceDate) };
+    },
+    research: async current => {
+      const request = buildOpenAIRequest({ ...input, notes: `${input.notes || ""}\n前回の不合格理由: ${repairFeedback(current.content, current.sources, current.quality).join(" ")}\n出典不足の場合は、最新の公式一次資料をWeb検索し、検索で実際に返ったURLを使用する。` }, referenceDate);
+      const response = await callOpenAI(request);
+      const raw = JSON.parse(extractOutputText(response));
+      const sources = normalizeSources(raw.sources, extractWebEvidence(response));
+      let content = applyAccountRules(validateContent(raw.content, input.contentType), input.account, input.contentType);
+      content = validateContent(await normalizeTextLengths({ ...input, content, sources }), input.contentType);
+      return { content, sources, quality: await evaluateContentQuality({ ...input, content, sources }, referenceDate) };
+    }
+  });
+}
+
 function qualityRank(quality) {
   const checks = quality?.checks || [];
   const failedCount = checks.filter((check) => check.pass === false).length;
@@ -571,6 +607,11 @@ async function generateWithOpenAI(input, referenceDate = new Date()) {
       quality = candidateQuality;
     }
   }
+  const normalized = await normalizeTextLengths({ ...input, content, sources });
+  if (JSON.stringify(normalized) !== JSON.stringify(content)) {
+    content = validateContent(normalized, input.contentType);
+    quality = await evaluateContentQuality({ ...input, content, sources }, referenceDate);
+  }
   return { content, sources, quality };
 }
 
@@ -584,6 +625,8 @@ async function generateCarousel(input, referenceDate = new Date()) {
 
 module.exports = {
   generateCarousel,
+  normalizeTextLengths,
+  autoImproveQuality,
   evaluateContentQuality,
   contentSchema,
   researchSchema,

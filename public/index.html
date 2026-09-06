@@ -11,7 +11,7 @@
 <body>
   <main class="shell">
     <header class="top">
-      <div><div class="eyebrow">就活研究所｜Content Quality MVP v0.9.8</div><h1>Instagram<br>Research Studio</h1><p class="lead">IRの事実を就活生向けに読み解き、参照元・品質評価・5枚の画像まで生成します。</p></div>
+      <div><div class="eyebrow">就活研究所｜Content Quality MVP v0.9.11</div><h1>Instagram<br>Research Studio</h1><p class="lead">IRの事実を就活生向けに読み解き、参照元・品質評価・5枚の画像まで生成します。</p></div>
       <div id="mode" class="badge">設定を確認中…</div>
     </header>
     <div class="grid">
@@ -75,9 +75,40 @@
     }
     function photoHtml(post) {
       const photo = post.coverPhoto;
-      if (photo?.status === "ready") return `<details class="sources"><summary>表紙写真：Pexels</summary><p>Photo by <a href="${escapeHtml(photo.photographerUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(photo.photographer)}</a> on <a href="https://www.pexels.com" target="_blank" rel="noopener noreferrer">Pexels</a>｜<a href="${escapeHtml(photo.sourceUrl)}" target="_blank" rel="noopener noreferrer">写真を確認</a></p></details>`;
-      if (photo?.status === "failed") return `<div class="sources fail">表紙写真を取得できませんでした：${escapeHtml(photo.error || "Pexels APIを確認してください")}</div>`;
-      return '<div class="sources suggestion">表紙は仮画像です。写真の自動配置には.envのPEXELS_API_KEYを設定してください。｜<a href="https://www.pexels.com/api/" target="_blank" rel="noopener noreferrer">Pexels API</a></div>';
+      const locked = ["published", "publishing", "publish_unknown"].includes(post.status);
+      return `<details class="sources"><summary>表紙写真・誠実さチェック：${post.imageReview ? "確認記録あり（編集後は再確認）" : "要確認"}</summary>
+        <p>自動の合格判定ではありません。写真と投稿内容を見て、人が判断してください。迷う場合はチェックせず差し替えてください。</p>
+        <p>写真：${escapeHtml(photo?.provider || "未取得")} / ${escapeHtml(photo?.status || "未取得")}</p>
+        ${photo?.provider === "Pexels" && photo.sourceUrl ? `<a href="${escapeHtml(photo.sourceUrl)}" target="_blank" rel="noopener noreferrer">写真・撮影者を確認</a>` : ""}
+        ${locked ? "<p>公開済み画像は変更できません。新しい投稿を作成してください。</p>" : `<label>写真の検索語（例：商社 オフィス 建物）</label><input id="photoQuery-${post.id}" value="${escapeHtml(photo?.query || post.content.imageQuery)}"><button type="button" class="ghost" onclick="changeCover('${post.id}')">別の写真を取得して再生成</button>
+        <label>手持ち画像に差し替え（JPEG・PNG・WebP / 650KB以下）</label><input type="file" accept="image/jpeg,image/png,image/webp" onchange="uploadCover('${post.id}',this)">
+        ${(state.config.imageChecks || []).map((label, i) => `<label><input style="width:auto" type="checkbox" id="imageCheck-${post.id}-${i}"> ${escapeHtml(label)}</label>`).join("")}
+        <button type="button" class="secondary" onclick="reviewCover('${post.id}')">画像チェックを記録</button>`}</details>`;
+    }
+    async function coverAction(id, action, body) {
+      setPending(id, true);
+      try { replacePost(await request(`/api/posts/${id}/${action}`, { method: "POST", body: JSON.stringify(body) })); }
+      catch (error) { alert(error.message); }
+      finally { state.pending.delete(id); render(); }
+    }
+    async function changeCover(id) {
+      const query = document.getElementById(`photoQuery-${id}`).value;
+      if (!confirm("表紙を差し替え、5枚を再生成します。承認と画像チェックはリセットされます。")) return;
+      await coverAction(id, "cover", { query });
+    }
+    async function uploadCover(id, input) {
+      const file = input.files[0];
+      if (!file) return;
+      if (file.size > 650000) { alert("画像を650KB以下に縮小してください。"); input.value = ""; return; }
+      if (!confirm("この画像の利用権と人物の公開許諾を確認済みですか？差し替え後は再承認が必要です。")) { input.value = ""; return; }
+      try {
+        const data = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(",")[1]); reader.onerror = reject; reader.readAsDataURL(file); });
+        await coverAction(id, "cover", { data, rightsConfirmed: true });
+      } catch { alert("画像を読み込めませんでした。"); }
+    }
+    async function reviewCover(id) {
+      const checks = state.config.imageChecks.map((_, i) => document.getElementById(`imageCheck-${id}-${i}`).checked);
+      await coverAction(id, "image-review", { checks });
     }
     function logoHtml(post) {
       const logos = Object.values(post.companyLogos || {});
@@ -111,7 +142,7 @@
       try { const post = await request("/api/posts", { method: "POST", body: JSON.stringify(data) }); state.posts.unshift(post); render(); $("#formStatus").innerHTML = '<span class="ok">生成しました。内容を確認して承認してください。</span>'; form.elements.topic.value = ""; }
       catch (error) { $("#formStatus").textContent = error.message; } finally { button.disabled = false; }
     });
-    async function toggleApproval(id, action) { setPending(id, true); try { replacePost(await request(`/api/posts/${id}/${action}`, { method: "POST" })); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
+    async function toggleApproval(id, action) { setPending(id, true); const busyCard = [...document.querySelectorAll('.card.busy')][0]; if (busyCard) busyCard.insertAdjacentHTML('afterbegin', '<p role="status">文字数の自動調整・承認条件を確認中です…</p>'); try { const updated = await request(`/api/posts/${id}/${action}`, { method: "POST" }); replacePost(updated); if (updated.notice) alert(updated.notice); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
     async function regenerate(id) { if (!confirm("現在の原稿を置き換えて再生成しますか？")) return; setPending(id, true); try { replacePost(await request(`/api/posts/${id}/regenerate`, { method: "POST" })); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
     async function publishPost(id) { if (!confirm(state.config.dryRun ? "投稿APIのドライランを実行しますか？" : "Instagramに公開しますか？")) return; setPending(id, true); try { replacePost(await request(`/api/posts/${id}/publish`, { method: "POST" })); } catch (error) { alert(error.message); } finally { state.pending.delete(id); render(); } }
     function downloadPost(id) { window.location.assign(`/api/posts/${encodeURIComponent(id)}/export`); }
@@ -148,7 +179,7 @@
       const originalLabel = button.textContent;
       controls.forEach((control) => { control.disabled = true; });
       button.textContent = "保存・再生成中…";
-      $("#editorStatus").textContent = "品質を再評価し、5枚の画像を再生成しています。";
+      $("#editorStatus").textContent = "文字数を自動調整し、品質評価と5枚の画像生成を行っています。";
       $("#editor").setAttribute("aria-busy", "true");
       try {
         const updated = await request(`/api/posts/${id}`, { method: "PUT", body: JSON.stringify({ content }) });

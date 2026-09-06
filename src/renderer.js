@@ -159,15 +159,16 @@ function quantitativeSvg({ content, account, design, logos = {} }) {
   const q = content.quantitative;
   const bars = q.metrics.map((metric, index) => {
     const y = 322 + index * 118;
-    const width = Math.max(10, Math.round(metric.value * 6.3));
+    const width = Math.round(Math.min(100, Math.max(0, Number(metric.value) || 0)) * 5.1);
+    const valueFit = [...String(metric.displayValue)].reduce((sum, char) => sum + (/[\x00-\x7F]/.test(char) ? 14 : 24), 0) > 180 ? 'textLength="180" lengthAdjust="spacingAndGlyphs"' : "";
     const label = metric.entityType === "company"
-      ? companyLogoSvg(metric.companyDomain, logos, { x: 78, y: y - 49, width: 150, height: 58 })
+      ? companyLogoSvg(metric.companyDomain, logos, { x: 78, y: y - 38, width: 150, height: 58 })
       : `<text x="78" y="${y}" font-size="25" font-weight="600" fill="${colors.navy}">${escapeXml(metric.label)}</text>`;
     return `
       ${label}
-      <rect x="270" y="${y - 33}" width="720" height="48" rx="24" fill="${colors.paleBlue}"/>
+      <rect x="270" y="${y - 33}" width="510" height="48" rx="24" fill="${colors.paleBlue}"/>
       <rect x="270" y="${y - 33}" width="${width}" height="48" rx="24" fill="${index === 0 ? colors.blue : colors.cyan}"/>
-      <text x="1000" y="${y}" font-size="24" font-weight="700" fill="${colors.navy}" text-anchor="end">${escapeXml(metric.displayValue)}</text>`;
+      <text x="1000" y="${y}" font-size="24" font-weight="700" fill="${colors.navy}" text-anchor="end" ${valueFit}>${escapeXml(metric.displayValue)}</text>`;
   }).join("");
   const summary = wrapJapanese(q.summaryText, 27);
   const insight = wrapJapanese(q.studentInsight, 38);
