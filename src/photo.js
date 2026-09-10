@@ -2,6 +2,25 @@ const crypto = require("node:crypto");
 
 const PEXELS_API = "https://api.pexels.com/v1/search";
 
+async function reviewPhoto(buffer, context = "business research", mode = "photo") {
+  if (!process.env.OPENAI_API_KEY) throw new Error("写真の自動審査にはOpenAI接続が必要です。");
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-5.6",
+      instructions: mode === "layout" ? `Inspect all five rendered carousel pages. Expected topic/type/data: ${context}. Reject overlapping text, clipping, missing company logos, missing values, wrong company/value pairing, unreadably small text, blank pages or unbalanced unexplained gaps. Return safe=true only when every page passes; explain defects in reason. Ignore image subject aesthetics here.` : `Review this stock image for a factual Japanese employer research account. Topic: ${context}. Accept only relevant neutral-to-positive industry scenes, offices, or naturally working professionals. Reject anger, distress, crying, exhaustion, displeasure, stress, unnatural expressions or poses, mockery, stereotypes, irrelevant people and misleading workplace implications. Judge visible presentation, not actual personality or working conditions. Set safe=false if uncertain. Do not identify people.`,
+      input: [{ role: "user", content: (Array.isArray(buffer) ? buffer : [buffer]).map(bytes => ({ type: "input_image", image_url: `data:image/${mode === "layout" ? "png" : "jpeg"};base64,${bytes.toString("base64")}` })) }],
+      text: { format: { type: "json_schema", name: "photo_review", strict: true, schema: { type: "object", properties: { safe: { type: "boolean" }, reason: { type: "string" } }, required: ["safe", "reason"], additionalProperties: false } } }
+    })
+  });
+  if (!response.ok) throw new Error(`写真審査 ${response.status}`);
+  const result = await response.json();
+  const raw = result.output_text || (result.output || []).flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text).join("");
+  return JSON.parse(raw);
+}
+
 function selectPhoto(photos, query) {
   if (!photos.length) return null;
   const digest = crypto.createHash("sha256").update(query).digest();
@@ -12,8 +31,11 @@ async function fetchCoverPhoto(query, excludeId = "") {
   const apiKey = process.env.PEXELS_API_KEY;
   if (!apiKey) return { buffer: null, metadata: { provider: "Pexels", status: "not_configured", query } };
   try {
+    const queries = [query, `${query} office business`, `${query} professional working naturally`, "modern office architecture"];
+    const seen = new Set([String(excludeId)]);
+    for (const searchQuery of queries) {
     const url = new URL(PEXELS_API);
-    url.searchParams.set("query", query);
+    url.searchParams.set("query", searchQuery);
     url.searchParams.set("orientation", "landscape");
     url.searchParams.set("size", "large");
     url.searchParams.set("locale", "ja-JP");
@@ -24,17 +46,26 @@ async function fetchCoverPhoto(query, excludeId = "") {
     });
     if (!response.ok) throw new Error(`Pexels API ${response.status}`);
     const body = await response.json();
-    const photo = selectPhoto((Array.isArray(body.photos) ? body.photos : []).filter((p) => String(p.id) !== String(excludeId)), query + excludeId);
-    if (!photo?.src?.landscape) throw new Error("条件に合う写真が見つかりませんでした。");
-    const imageResponse = await fetch(photo.src.landscape, { signal: AbortSignal.timeout(20_000) });
-    if (!imageResponse.ok) throw new Error(`写真取得 ${imageResponse.status}`);
-    const buffer = Buffer.from(await imageResponse.arrayBuffer());
-    if (!buffer.length || buffer.length > 20_000_000) throw new Error("写真データのサイズが不正です。");
+    const candidates = (Array.isArray(body.photos) ? body.photos : []).filter((p) => String(p.id) !== String(excludeId));
+    let photo, buffer, review;
+    for (const candidate of candidates.filter(p => !seen.has(String(p.id))).slice(0, 2)) {
+      seen.add(String(candidate.id));
+      if (!candidate?.src?.landscape) continue;
+      const imageResponse = await fetch(candidate.src.landscape, { signal: AbortSignal.timeout(20_000) });
+      if (!imageResponse.ok) continue;
+      const bytes = Buffer.from(await imageResponse.arrayBuffer());
+      if (!bytes.length || bytes.length > 20_000_000) continue;
+      const checked = await reviewPhoto(bytes, query);
+      if (checked.safe !== true) continue;
+      photo = candidate; buffer = bytes; review = checked; break;
+    }
+    if (!photo?.src?.landscape) continue;
     return {
       buffer,
       metadata: {
         provider: "Pexels",
         status: "ready",
+        automatedReview: { ...review, policy: "neutral-relevant-v2" },
         id: String(photo.id),
         query,
         photographer: String(photo.photographer || "Unknown"),
@@ -44,6 +75,8 @@ async function fetchCoverPhoto(query, excludeId = "") {
         alt: String(photo.alt || "")
       }
     };
+    }
+    throw new Error("8候補以内に品質基準を満たす写真が見つかりませんでした。");
   } catch (error) {
     return { buffer: null, metadata: { provider: "Pexels", status: "failed", query, error: error.message } };
   }
@@ -73,4 +106,4 @@ async function uploadedCoverPhoto(data) {
   return { buffer, metadata: { provider: "Upload", status: "ready", id: crypto.createHash("sha256").update(buffer).digest("hex"), data: buffer.toString("base64"), sourceUrl: "", rights: "利用者が使用許諾を確認" } };
 }
 
-module.exports = { fetchCoverPhoto, restoreCoverPhoto, selectPhoto, uploadedCoverPhoto };
+module.exports = { fetchCoverPhoto, restoreCoverPhoto, selectPhoto, uploadedCoverPhoto, reviewPhoto };

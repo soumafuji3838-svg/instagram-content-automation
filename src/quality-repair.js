@@ -1,12 +1,13 @@
-const { publicationGate, QUALITY_CRITERIA, structureChecks } = require("./quality");
+const { publicationGate, QUALITY_CRITERIA, structureChecks, comparisonEvidenceIssues } = require("./quality");
 function ready(candidate) {
-  return publicationGate(candidate.quality, candidate.content, candidate.sources, {}).ready;
+  return publicationGate(candidate.quality, candidate.content, candidate.sources, {}, { checkLogos: false }).ready;
 }
 function needsResearch(candidate) {
+  if (comparisonEvidenceIssues(candidate.content).length) return true;
   return QUALITY_CRITERIA.slice(1, 3).some(criterion => !candidate.quality?.checks?.some(check => check.criterion === criterion && check.score >= 4));
 }
 function rank(candidate) {
-  const gate = publicationGate(candidate.quality, candidate.content, candidate.sources, {});
+  const gate = publicationGate(candidate.quality, candidate.content, candidate.sources, {}, { checkLogos: false });
   return [Number(gate.ready), -gate.failed.length, -structureChecks(candidate.content, candidate.sources).length, Number(candidate.quality?.overallScore) || 0];
 }
 function better(next, previous) {
@@ -32,6 +33,6 @@ async function improveQuality(initial, { rewrite, research }) {
       break;
     }
   }
-  return { ...best, repairReport: { ready: ready(best), attempts, failed: publicationGate(best.quality, best.content, best.sources, {}).failed } };
+  return { ...best, repairReport: { ready: ready(best), attempts, failed: publicationGate(best.quality, best.content, best.sources, {}, { checkLogos: false }).failed } };
 }
 module.exports = { improveQuality, needsResearch, better };

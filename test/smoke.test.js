@@ -2,9 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { wrapJapanese, escapeXml, quantitativeSvg, comparisonSvg } = require("../src/renderer");
+const { wrapJapanese, escapeXml, quantitativeSvg, qualitativeSvg, comparisonSvg } = require("../src/renderer");
 const { demoContent, validateContent, extractOutputText, buildOpenAIRequest, buildRepairRequest, repairFeedback, qualityRank, isBetterQuality, applyAccountRules, resolveCta, comparisonRowsFor } = require("../src/generator");
-const { contentTypes } = require("../src/content-types");
+const { contentTypes, getContentType } = require("../src/content-types");
 const { getDesign } = require("../src/designs");
 const { evidenceKey, extractWebEvidence, normalizeSources, sourceChecks, normalizeQuality, structureChecks, publicationGate, QUALITY_CRITERIA, OVERALL_PASS_SCORE, minimumScoreFor } = require("../src/quality");
 const { selectPhoto } = require("../src/photo");
@@ -52,7 +52,8 @@ test("demo carousel has the five-page structured content", () => {
   const content = demoContent({ topic: "面接準備", targetYear: "28卒", account: accounts[0] });
   assert.equal(content.quantitative.metrics.length, 3);
   assert.equal(content.comparison.columns.length, 3);
-  assert.equal(content.comparison.columns[0].entityType, "industry");
+  assert.equal(content.postType, "industry_report");
+  assert.equal(content.comparison.columns[0].entityType, "company");
   assert.equal(content.comparison.rows.length, 4);
   assert.ok(content.quantitative.studentInsight);
   assert.ok(content.qualitative.studentInsight);
@@ -90,7 +91,7 @@ test("five-page photo design is defined in JSON", () => {
 test("content validation rejects an invalid metric count", () => {
   const content = demoContent({ topic: "面接準備", targetYear: "28卒", account: accounts[0] });
   content.quantitative.metrics.pop();
-  assert.throws(() => validateContent(content, "industry_report"), /3件/);
+  assert.throws(() => validateContent(content, "industry_report"), /3〜5件/);
 });
 
 test("content validation normalizes hashtags without hash marks", () => {
@@ -102,7 +103,7 @@ test("content validation normalizes hashtags without hash marks", () => {
 test("comparison rows switch between industry and company formats", () => {
   assert.deepEqual(comparisonRowsFor("industry_report"), ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
   assert.deepEqual(comparisonRowsFor("industry_comparison"), ["市場成長性", "主要企業", "直近3カ月の変化", "専門性"]);
-  assert.deepEqual(comparisonRowsFor("company_report"), ["平均年収", "内定倍率", "直近3カ月の変化", "カルチャー"]);
+  assert.deepEqual(comparisonRowsFor("company_report"), ["主要事業", "収益構造", "直近3カ月の変化", "就活での確認点"]);
 });
 
 test("photo choice is deterministic", () => {
@@ -156,9 +157,9 @@ test("company labels render as logos or generic icons instead of names", () => {
   const design = getDesign(accounts[0].designId);
   const quantitative = quantitativeSvg({ content, account: accounts[0], design, logos: {} });
   const comparison = comparisonSvg({ content, account: accounts[0], design, logos: {} });
-  assert.doesNotMatch(quantitative, />企業A</);
-  assert.doesNotMatch(comparison, />企業A</);
-  assert.match(quantitative, /<g fill="none"/);
+  assert.match(quantitative, />企業A</);
+  assert.match(comparison, />企業A</);
+  assert.doesNotMatch(quantitative, /<g fill="none"/);
 });
 
 test("OpenAI output text is collected from raw Responses API items", () => {
@@ -204,8 +205,8 @@ test("repair request rewrites only supplied content without web search", () => {
   const request = buildRepairRequest({ content, sources: [], topic: "総合商社", contentType: "industry_report", targetYear: "28卒", feedback: ["短い"] });
   assert.equal(request.tools, undefined);
   assert.equal(request.text.format.strict, true);
-  assert.match(request.instructions, /Never invent or estimate/);
-  assert.match(request.instructions, /replace a mismatched value with 確認できず/);
+  assert.match(request.instructions, /Never invent unsupported/);
+  assert.match(request.instructions, /derive a cautious interpretation labeled 推測/);
   assert.match(request.instructions, /Never generalize one company's fact/);
   assert.deepEqual(JSON.parse(request.input).failedChecks, ["短い"]);
   assert.deepEqual(JSON.parse(request.input).fixedComparisonRows, ["直近業績", "主な事業領域", "直近3カ月の変化", "就活での確認点"]);
@@ -266,6 +267,58 @@ test("research request requires exact URLs returned by web search", () => {
 
 test("all requested content types are available", () => {
   assert.deepEqual(contentTypes.map((type) => type.id), ["industry_report", "company_report", "industry_comparison", "company_comparison", "trend_report"]);
+});
+
+test("every post type owns its page labels and expected entity kinds", () => {
+  assert.equal(getContentType("company_report").sectionLabels.quantitative, "企業｜定量データ");
+  assert.equal(getContentType("company_report").sectionLabels.qualitative, "企業｜強みと課題");
+  assert.equal(getContentType("industry_report").comparisonEntityType, "company");
+  assert.equal(getContentType("industry_comparison").comparisonEntityType, "industry");
+});
+
+test("company report pages never fall back to industry report labels", () => {
+  const content = demoContent({ topic: "企業研究", targetYear: "28卒", account: accounts[0], contentType: "company_report" });
+  const design = getDesign(accounts[0].designId);
+  const pages = [
+    quantitativeSvg({ content, account: accounts[0], design, contentType: "company_report" }),
+    qualitativeSvg({ content, account: accounts[0], design, contentType: "company_report" }),
+    comparisonSvg({ content, account: accounts[0], design, contentType: "company_report" })
+  ].join("\n");
+  assert.match(pages, /企業｜定量データ/);
+  assert.match(pages, /企業｜強みと課題/);
+  assert.match(pages, /企業｜競合比較/);
+  assert.doesNotMatch(pages, /業界レポート|業界｜定量データ/);
+});
+
+test("content validation rejects a generated post type or entity mismatch", () => {
+  const company = demoContent({ topic: "企業研究", targetYear: "28卒", account: accounts[0], contentType: "company_report" });
+  company.postType = "industry_report";
+  assert.throws(() => validateContent(company, "company_report"), /投稿タイプが一致/);
+  const comparison = demoContent({ topic: "企業比較", targetYear: "28卒", account: accounts[0], contentType: "company_comparison" });
+  comparison.comparison.columns[0].entityType = "industry";
+  assert.throws(() => validateContent(comparison, "company_comparison"), /比較対象が一致/);
+});
+
+test("research request requires official Japan employment evidence for every company", () => {
+  const request = buildOpenAIRequest({ topic: "SaaS企業", contentType: "company_comparison", targetYear: "28卒", account: accounts[0], notes: "" });
+  assert.match(request.instructions, /Japanese job seekers can realistically apply/);
+  assert.match(request.instructions, /reputable job board listing the named employer/);
+  assert.match(request.instructions, /sourceType to japan_employment/);
+  assert.equal(JSON.parse(request.input).contentTypeId, "company_comparison");
+});
+
+test("publication structure requires verified official Japan employment evidence", () => {
+  const content = demoContent({ topic: "企業比較", targetYear: "28卒", account: accounts[0], contentType: "company_comparison" });
+  const missing = structureChecks(content, []);
+  assert.ok(missing.some((message) => message.includes("日本国内での公式採用情報")));
+  const sources = content.comparison.columns.map((column, index) => ({
+    id: `J${index + 1}`,
+    sourceType: "japan_employment",
+    japanEmploymentCompanies: [column.name],
+    verifiedBySearch: true
+  }));
+  const checked = structureChecks(content, sources);
+  assert.ok(!checked.some((message) => message.includes("日本国内での公式採用情報")));
 });
 
 test("web evidence verifies recent source URLs", () => {

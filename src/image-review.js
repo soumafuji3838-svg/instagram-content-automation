@@ -10,6 +10,7 @@ function fingerprint(post) {
   return crypto.createHash("sha256").update(JSON.stringify([post.content, post.assets, post.coverPhoto?.id])).digest("hex");
 }
 function imageReviewReady(post) {
+  if (post.generationSource !== "demo" && post.generationSource && post.renderValidation?.passed !== true) return false;
   return post.coverPhoto?.status === "ready" && post.imageReview?.fingerprint === fingerprint(post) && checks.every((_, i) => post.imageReview?.checks?.[i] === true);
 }
 module.exports = { checks, fingerprint, imageReviewReady };
