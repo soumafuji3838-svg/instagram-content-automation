@@ -11,7 +11,7 @@ async function main() {
   const topic = "半導体業界";
   const contentType = "industry_report";
   const content = demoContent({ topic, targetYear: "28・29卒", account, contentType });
-  const assets = await renderCarousel({ id, topic, contentType, content, account });
+  const assets = await renderCarousel({ id, topic, contentType, content, account, strict: false });
   const manifest = { id, content, assets };
   await fs.writeFile(path.join(process.cwd(), "output", id, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify(manifest, null, 2));

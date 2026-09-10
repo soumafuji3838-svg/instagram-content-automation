@@ -4,7 +4,7 @@ const { improveQuality } = require("../src/quality-repair");
 const { QUALITY_CRITERIA } = require("../src/quality");
 const { limits } = require("../src/text-length");
 function candidate(score = 90, referenceScore = 5) {
-  const content = { quantitative: { metrics: [] , sourceIds: ["S1"] }, qualitative: { sourceIds: ["S1"] }, comparison: { rows: [] } };
+  const content = { quantitative: { metrics: [0,1,2].map(i=>({label:`項目${i}`,sourceIds:["S1"]})) , sourceIds: ["S1"] }, qualitative: { sourceIds: ["S1"] }, comparison: { columns: [0,1,2].map(i=>({name:`業界${i}`,entityType:"industry"})), rows: [] } };
   for (const [section, key, min] of limits) content[section][key] = "あ".repeat(min);
   return { content, sources: [{ id: "S1", url: "https://example.com" }], quality: { overallScore: score, checks: QUALITY_CRITERIA.map((criterion, i) => ({ criterion, score: i === 2 ? referenceScore : 5 })) } };
 }

@@ -125,7 +125,7 @@ async function fetchOfficialLogo(domain) {
   const attemptedUrls = [];
   const errors = [];
 
-  for (const url of prioritizedLogoCandidates(candidates, fallbackUrls)) {
+  for (const url of prioritizedLogoCandidates(candidates, fallbackUrls, Infinity)) {
     attemptedUrls.push(url);
     try {
       const image = await fetchBuffer(url);
@@ -150,11 +150,20 @@ function logoDomains(content) {
 async function prepareCompanyLogos(content, directory) {
   const logoDirectory = path.join(directory, "logos");
   await fs.mkdir(logoDirectory, { recursive: true });
+  let registry = {};
+  for (const registryPath of [path.join(process.cwd(), "config", "logos.json"), path.join(directory, "logos.json")]) {
+    try { registry = { ...registry, ...JSON.parse(await fs.readFile(registryPath, "utf8")) }; } catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
   const entries = await Promise.all(logoDomains(content).map(async (domain) => {
     const filePath = path.join(logoDirectory, `${safeFileName(domain)}.png`);
-    try { return [domain, { buffer: await fs.readFile(filePath), metadata: { domain, status: "cached" } }]; }
+    try { return [domain, { buffer: await normalizeLogo(await fs.readFile(filePath)), metadata: { ...registry[domain], domain, status: "cached" } }]; }
     catch { /* download below */ }
-    const result = await fetchOfficialLogo(domain);
+    const saved = registry[domain];
+    if (saved?.sourceUrl) {
+      try { const image = await fetchBuffer(saved.sourceUrl); const buffer = await normalizeLogo(image.buffer); await fs.writeFile(filePath,buffer); return [domain,{buffer,metadata:{...saved,domain,status:"cached"}}]; } catch { /* use all discovery fallbacks */ }
+    }
+    let result = await fetchOfficialLogo(domain);
+    if (!result.buffer) result = await fetchOfficialLogo(domain);
     if (result.buffer) await fs.writeFile(filePath, result.buffer);
     return [domain, result];
   }));
@@ -163,4 +172,10 @@ async function prepareCompanyLogos(content, directory) {
   return logos;
 }
 
-module.exports = { normalizeDomain, domainHosts, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, fetchOfficialLogo, logoDomains, prepareCompanyLogos };
+function assertCompanyLogos(content, logos) {
+  const companies = [content.subject, ...(content.quantitative?.metrics || []).map(m => ({...m,domain:m.companyDomain})), ...(content.comparison?.columns || [])].filter(c=>c?.entityType === "company");
+  const missing=companies.filter(c=>!normalizeDomain(c.domain)||!logos[normalizeDomain(c.domain)]?.buffer?.length);
+  if(missing.length)throw new Error(`企業ロゴが不足しています：${missing.map(c=>c.name||c.label).join("、")}`);
+}
+
+module.exports = { assertCompanyLogos, normalizeDomain, domainHosts, iconLinks, logoLinks, logoFallbackUrls, prioritizedLogoCandidates, fetchOfficialLogo, logoDomains, prepareCompanyLogos };

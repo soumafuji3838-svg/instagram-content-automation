@@ -23,6 +23,10 @@ const root = process.cwd();
 const accounts = require("../config/accounts.json");
 const mimeTypes = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".json": "application/json; charset=utf-8" };
 
+async function readRenderValidation(id) {
+  try { return JSON.parse(await fs.readFile(path.join(outputRoot(), id, "validation.json"), "utf8")); } catch { return null; }
+}
+
 async function readLogoMetadata(id) {
   try { return JSON.parse(await fs.readFile(path.join(outputRoot(), id, "logos.json"), "utf8")); }
   catch { return {}; }
@@ -131,11 +135,11 @@ async function handler(req, res) {
       const id = `${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
       const generated = await generateCarousel({ topic, contentType: contentType.id, targetYear: String(body.targetYear || account.target), notes: String(body.notes || ""), account });
       const coverPhoto = await fetchCoverPhoto(generated.content.imageQuery);
-      const renderedAssets = await renderCarousel({ id, topic, contentType: contentType.id, content: generated.content, account, coverPhoto });
+      const renderedAssets = await renderCarousel({ id, topic, contentType: contentType.id, content: generated.content, account, coverPhoto, strict: generated.source !== "demo" });
       const companyLogos = await readLogoMetadata(id);
       const assets = await persistRenderedAssets(id, renderedAssets);
       const now = new Date().toISOString();
-      const post = await createPost({ id, topic, contentType: contentType.id, contentTypeLabel: contentType.label, notes: String(body.notes || ""), accountId: account.id, accountName: account.name, targetYear: body.targetYear || account.target, status: "review", generationSource: generated.source, content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, createdAt: now, updatedAt: now });
+      const post = await createPost({ id, topic, contentType: contentType.id, contentTypeLabel: contentType.label, notes: String(body.notes || ""), accountId: account.id, accountName: account.name, targetYear: body.targetYear || account.target, status: "review", generationSource: generated.source, renderValidation: await readRenderValidation(id), content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, createdAt: now, updatedAt: now });
       return json(res, 201, post);
     }
 
@@ -154,9 +158,9 @@ async function handler(req, res) {
       const coverPhoto = body.data ? await uploadedCoverPhoto(body.data) : await fetchCoverPhoto(query, existing.coverPhoto?.id);
       if (!coverPhoto.buffer) return json(res, 422, { error: coverPhoto.metadata.error || "写真を取得できません。検索語を変更してください。" });
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
-      const rendered = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: existing.content, account, coverPhoto });
+      const rendered = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: existing.content, account, coverPhoto, strict: existing.generationSource !== "demo" });
       const assets = await persistRenderedAssets(existing.id, rendered);
-      const post = await updatePost(existing.id, { coverPhoto: coverPhoto.metadata, assets, imageReview: null, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      const post = await updatePost(existing.id, { renderValidation: await readRenderValidation(existing.id), coverPhoto: coverPhoto.metadata, assets, imageReview: null, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       await deleteBlobAssets(existing.assets).catch(() => {});
       return json(res, 200, post);
     }
@@ -172,10 +176,10 @@ async function handler(req, res) {
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const quality = await evaluateContentQuality({ content, sources: existing.sources || [], topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear });
       const coverPhoto = await restoreCoverPhoto(existing.coverPhoto);
-      const renderedAssets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account, coverPhoto });
+      const renderedAssets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account, coverPhoto, strict: existing.generationSource !== "demo" });
       const companyLogos = await readLogoMetadata(existing.id);
       const assets = await persistRenderedAssets(existing.id, renderedAssets);
-      const post = await updatePost(existing.id, { imageReview: null, content, companyLogos, quality, assets, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      const post = await updatePost(existing.id, { renderValidation: await readRenderValidation(existing.id), imageReview: null, content, companyLogos, quality, assets, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       await deleteBlobAssets(existing.assets).catch((error) => console.warn(`古いBlob画像の削除をスキップしました: ${error.message}`));
       return json(res, 200, post);
     }
@@ -202,10 +206,10 @@ async function handler(req, res) {
       const account = accounts.find((item) => item.id === existing.accountId) || accounts[0];
       const generated = await generateCarousel({ topic: existing.topic, contentType: existing.contentType, targetYear: existing.targetYear, notes: existing.notes || "", account });
       const coverPhoto = await fetchCoverPhoto(generated.content.imageQuery);
-      const renderedAssets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: generated.content, account, coverPhoto });
+      const renderedAssets = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content: generated.content, account, coverPhoto, strict: generated.source !== "demo" });
       const companyLogos = await readLogoMetadata(existing.id);
       const assets = await persistRenderedAssets(existing.id, renderedAssets);
-      const post = await updatePost(existing.id, { imageReview: null, content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, generationSource: generated.source, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
+      const post = await updatePost(existing.id, { renderValidation: await readRenderValidation(existing.id), imageReview: null, content: generated.content, sources: generated.sources, coverPhoto: coverPhoto.metadata, companyLogos, quality: generated.quality, assets, generationSource: generated.source, status: "review", approvedAt: null, publishResult: null, publishedAt: null });
       await deleteBlobAssets(existing.assets).catch((error) => console.warn(`古いBlob画像の削除をスキップしました: ${error.message}`));
       return json(res, 200, post);
     }
@@ -221,12 +225,12 @@ async function handler(req, res) {
         const { content, sources, quality } = improved;
         const coverPhoto = await restoreCoverPhoto(existing.coverPhoto);
         if (existing.coverPhoto?.status === "ready" && !coverPhoto?.buffer) return json(res, 422, { error: "表紙の復元に失敗しました。元の原稿は変更していません。再実行してください。" });
-        const rendered = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account, coverPhoto });
+        const rendered = await renderCarousel({ id: existing.id, topic: existing.topic, contentType: existing.contentType, content, account, coverPhoto, strict: existing.generationSource !== "demo" });
         const assets = await persistRenderedAssets(existing.id, rendered);
         const companyLogos = await readLogoMetadata(existing.id);
         const finalGate = publicationGate(quality, content, sources, companyLogos);
         const report = { ...improved.repairReport, ready: finalGate.ready, failed: finalGate.failed, completedAt: new Date().toISOString() };
-        const saved = await updatePost(existing.id, { content, sources, quality, assets, companyLogos, imageReview: null, status: "review", approvedAt: null, qualityRepair: report });
+        const saved = await updatePost(existing.id, { renderValidation: await readRenderValidation(existing.id), content, sources, quality, assets, companyLogos, imageReview: null, status: "review", approvedAt: null, qualityRepair: report });
         await deleteBlobAssets(existing.assets).catch(() => {});
         return json(res, 200, { ...saved, notice: finalGate.ready ? `自動改善後の総合評価は${quality.overallScore}点で公開基準に合格しました。再調査・修正で内容が変わる場合があります。原稿と画像を確認し、画像チェックを記録して再度承認してください。` : `自動改善を実行しましたが、まだ合格していません（${quality.overallScore}点）。 ${finalGate.failed.join(" ")} ${report.attempts.filter(a => a.error).map(a => a.error).join(" ")} 投稿は行っていません。` });
       }
